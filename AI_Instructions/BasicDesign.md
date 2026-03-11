@@ -20,6 +20,7 @@ Create a toolchain that:
 * No preservation of FHIR `meta.*`.
 * No attempt to cover all of FHIR; only model what appears in sampled data.
 * No extensions (or any element) unless they appear in sampled data.
+  * **Note:** Extensions are modeled when present, but can be excluded via `ignore_extensions.yaml`.
 * No referential integrity enforcement by the database (no FK constraints). Integrity, if needed, is handled by loader logic and/or downstream analytics.
 
 ---
@@ -29,7 +30,18 @@ Create a toolchain that:
 ### Stage A — Python Profiler (“Compiler front-end”)
 
 **Input:** FHIR base URL; optional auth; sampling configuration.
-**Output:** `model-config.yaml` (or `.json`) including observed stats + proposed relational mapping.
+
+**Outputs (Stage A must emit all of these):**
+
+1) `model-config.yaml`
+   * Project-wide configuration, discovery snapshot, sampling knobs, heuristic settings.
+   * Observed stats and proposed modeling decisions/overrides.
+2) `table-schema.yaml`
+   * **Standalone** relational schema metadata sufficient to generate Postgres DDL.
+   * Contains tables, columns, primary keys, indexes, and FHIR source mappings.
+3) `ignore_extensions.yaml`
+   * List of extension URL patterns (supports wildcards) that are ignored everywhere they appear.
+   * Seeded with NDH: `http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-contactpoint-availabletime`
 
 Responsibilities:
 
@@ -40,7 +52,16 @@ Responsibilities:
   * Track **array cardinality distributions** for every array path.
   * Track **presence rates** for encountered paths.
   * Track **reference usage patterns** (target types and frequency) based on `Reference.reference`.
+* Infer **Postgres column types** during profiling (Stage A).
 * Emit a proposed model using aggressive flattening heuristics, plus **relationship tables** that store IDs but do not declare FKs.
+
+Key relational conventions required by this project:
+
+* **Surrogate primary key everywhere:** every table has `id bigserial primary key`.
+* For FHIR resources, store the original FHIR `Resource.id` separately (e.g., `fhir_id text`).
+* Join tables store **surrogate ids** (bigint) of the related entities (no FKs declared).
+* Dedupe/upsert is accomplished by generating **unique constraints/indexes** (Postgres 15+), including null semantics:
+  * Use `UNIQUE NULLS NOT DISTINCT` to treat NULLs as equal for deduplication.
 
 ### Stage B — Code Generator (“Compiler back-end”)
 
@@ -159,15 +180,15 @@ Two relational patterns:
 
 Use when repeated elements are inline components and appear owned by the parent.
 
-Child table structure:
+Child table structure (surrogate-id style):
 
-* `parent_id` (text) — the parent’s FHIR id
-* Optional `idx` (integer) — ordinal within the parent array
+* `id bigserial primary key`
+* `{parent}_parent_id bigint` — the parent table surrogate id (e.g., `organization_parent_id`)
+* Optional `idx` (integer) — ordinal within the parent array (optional; not always required when deduping)
 * Flattened component fields as columns
-* Primary key options (configurable):
-
-  * Composite key: `(parent_id, idx)`
-  * Or surrogate `row_id` plus indexes
+* Dedup/upsert:
+  * Add a unique constraint/index over the component columns (and include `{parent}_parent_id` if the row is truly parent-owned)
+  * Use Postgres 15+ `UNIQUE NULLS NOT DISTINCT`
 
 **No FK constraints** are declared. Instead:
 
@@ -177,15 +198,14 @@ Child table structure:
 
 Use when repeated items are references to shared resources (notably Endpoint) or otherwise shared.
 
-Join table structure:
+Join table structure (surrogate-id style):
 
-* `left_id` (text)
-* `right_id` (text)
+* `id bigserial primary key`
+* `{left}_id bigint`
+* `{right}_id bigint`
 * Optional relationship attributes (if present)
-* Primary key options:
-
-  * Composite `(left_id, right_id)` (plus any disambiguators)
-  * Or surrogate `row_id`
+* Dedup/upsert:
+  * Unique constraint on `({left}_id, {right}_id, ...)` using `UNIQUE NULLS NOT DISTINCT`
 
 **No FK constraints** are declared. Instead:
 
@@ -195,6 +215,19 @@ Join table structure:
 
 * Always unify Endpoint into a single table named `endpoint`.
 * Any resource linking to Endpoint results in an appropriate join table (e.g., `organization_endpoint`, `practitionerrole_endpoint`) storing IDs only.
+
+### A10b. NDH carve-out: Organization subtyping
+
+The NDH specification over-uses the `Organization` resource. Stage A must split Organization into sub-entities based on:
+
+* `Organization.type[].coding[].code`
+
+Rules:
+
+* For each observed type code `X`, create an entity/table family `organization_{X}` (e.g., `organization_pay`).
+* If an Organization has multiple type codes, it belongs to **all** corresponding subtype entities (it is profiled into each `organization_*`).
+* If an Organization has no type, it stays in the base `organization` entity/table.
+* Treat each `organization_{X}` as **independent for profiling** (paths/stats/decisions can diverge).
 
 ### A11. Flattening nested objects into columns
 
@@ -215,6 +248,10 @@ Sections:
 4. `model` (decisions + overrides)
 5. `naming` (table/column rename rules; singularization)
 6. `generation` (DDL + loader options; batching; upsert strategy; **no-fk enforcement**)
+
+Additional file:
+
+* `ignore_extensions.yaml` (list of extension URL patterns to skip everywhere)
 
 ### A13. Required override capabilities
 
@@ -248,18 +285,20 @@ User must be able to:
 * Resource table:
 
   * Name: singular (e.g., `organization`, `endpoint`)
-  * `id text primary key`
+  * `id bigserial primary key`
+  * `fhir_id text` (unique; used for resolving FHIR references)
 * Child table:
 
   * `{parent}_{component}` (singular)
-  * `parent_id text` + `idx int` (or surrogate key)
-  * Index on `parent_id`
+  * `id bigserial primary key`
+  * `{parent}_parent_id bigint`
+  * Index on `{parent}_parent_id`
 * Join table:
 
   * `{left}_{right}` (singular)
-  * `left_id text`, `right_id text`
+  * `id bigserial primary key`
+  * `{left}_id bigint`, `{right}_id bigint`
   * Indexes on both columns
-  * Composite PK or surrogate PK (configurable)
 
 ### B3. Indexes (important since no FKs)
 
@@ -337,17 +376,25 @@ version: 0.1
 database: postgres
 schema_name: public
 no_foreign_keys: true
+postgres_version_min: 15
+
+dedupe:
+  unique_nulls_not_distinct: true
 
 tables:
 
   endpoint:
     description: "FHIR Endpoint resources (shared dimension table)."
     primary_key:
-      strategy: "fhir_id"     # fhir_id | surrogate
+      strategy: "surrogate"
       columns: ["id"]
 
     columns:
       - name: id
+        type: bigserial
+        nullable: false
+
+      - name: fhir_id
         type: text
         nullable: false
         source:
@@ -417,12 +464,16 @@ tables:
   organization_endpoint:
     description: "Join table: Organization <-> Endpoint (no FK constraints)."
     primary_key:
-      strategy: "composite"
-      columns: ["organization_id", "endpoint_id"]
+      strategy: "surrogate"
+      columns: ["id"]
 
     columns:
+      - name: id
+        type: bigserial
+        nullable: false
+
       - name: organization_id
-        type: text
+        type: bigint
         nullable: false
         source:
           relationship:
@@ -430,7 +481,7 @@ tables:
             left_id_column: "id"
 
       - name: endpoint_id
-        type: text
+        type: bigint
         nullable: false
         source:
           relationship:
@@ -438,6 +489,10 @@ tables:
             right_id_column: "id"
 
     indexes:
+    unique_constraints:
+      - name: organization_endpoint_uniq
+        columns: ["organization_id", "endpoint_id"]
+        nulls_not_distinct: true
       - name: organization_endpoint_org_idx
         columns: ["organization_id"]
       - name: organization_endpoint_ep_idx
