@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fhir-tablesaw"
+version = "0.1.0"
+description = "FHIR R4 profiler that infers a FK-free Postgres schema (table-schema.yaml) and modeling config (model-config.yaml)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "DSACMS" }]
+
+dependencies = [
+  "httpx>=0.27.0",
+  "PyYAML>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+fhir-tablesaw-profile = "fhir_tablesaw.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
