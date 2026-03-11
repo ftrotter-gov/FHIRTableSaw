@@ -16,13 +16,7 @@ We adhere to the [CMS Open Source Policy](https://github.com/CMSGov/cms-open-sou
 
 _Submit a vulnerability:_ Vulnerability reports can be submitted through [Bugcrowd](https://bugcrowd.com/cms-vdp). Reports may be submitted anonymously. If you share contact information, we will acknowledge receipt of your report within 3 business days.
 
-### Software Bill of Materials (SBOM)
 
-A Software Bill of Materials (SBOM) is a formal record containing the details and supply chain relationships of various components used in building software.
-
-In the spirit of [Executive Order 14028 - Improving the Nation's Cyber Security](https://www.gsa.gov/technology/it-contract-vehicles-and-purchasing-programs/information-technology-category/it-security/executive-order-14028), a SBOM for this repository is provided here: https://github.com/{{ cookiecutter.project_org }}/{{ cookiecutter.project_repo_name }}/network/dependencies.
-
-For more information and resources about SBOMs, visit: https://www.cisa.gov/sbom.
 
 ## Public domain
 
