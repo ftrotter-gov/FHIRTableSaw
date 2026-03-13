@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-fhir-tablesaw-profile = "fhir_tablesaw.cli:main"
+fhir-tablesaw = "fhir_tablesaw.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

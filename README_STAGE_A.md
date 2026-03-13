@@ -18,7 +18,7 @@ pip install -e .[dev]
 
 ```bash
 . .venv/bin/activate
-python -m fhir_tablesaw.cli \
+fhir-tablesaw profile \
   --base-url https://hapi.fhir.org/baseR4 \
   --out-dir out \
   --max-resources-per-type 20 \
@@ -26,6 +26,17 @@ python -m fhir_tablesaw.cli \
 ```
 
 Outputs will be written to `out/`.
+
+## Emit per-table Postgres DDL (Stage B1)
+
+Given `out_ndh/table-schema.yaml`, generate one `CREATE TABLE` file per table:
+
+```bash
+. .venv/bin/activate
+fhir-tablesaw emit-sql \
+  --table-schema out_ndh/table-schema.yaml \
+  --out-dir out_ndh/sql/create_table
+```
 
 ## Tests
 

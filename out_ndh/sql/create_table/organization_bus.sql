@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS "public"."organization_bus" (
+  "id" bigserial NOT NULL,
+  "fhir_id" text NOT NULL,
+  "resource_type" text,
+  "language" text,
+  "text_status" text,
+  "text_div" text,
+  "active" boolean,
+  "name" text,
+  "identifier_status" text,
+  "coding_system" text,
+  "coding_version" text,
+  "coding_code" text,
+  "coding_display" text,
+  "address_city" text,
+  "address_state" text,
+  "address_postal_code" text,
+  "identifier_system" text,
+  "identifier_value" text,
+  CONSTRAINT "organization_bus_pk" PRIMARY KEY ("id"),
+  CONSTRAINT "organization_bus_fhir_id_uniq" UNIQUE NULLS NOT DISTINCT ("fhir_id")
+);
+CREATE INDEX IF NOT EXISTS "organization_bus_fhir_id_idx" ON "public"."organization_bus" ("fhir_id");

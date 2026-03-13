@@ -16,7 +16,7 @@ discovery:
       description: HAPI FHIR R4 Server
       url: https://ndh-server.fast.hl7.org/fhir
 sampling:
-  max_resources_per_type: 50
+  max_resources_per_type: 100
   page_size: 50
   rate_limit_qps: 2.0
   timeout_seconds: 30.0
@@ -29,9 +29,9 @@ heuristics:
   shared_fact_table_detection: cross_parent_component_name
 stats:
   Binary:
-    record_count_sampled: 50
+    record_count_sampled: 100
     fhir_id:
-      count: 50
+      count: 100
       uuid_count: 0
     arrays: {}
     scalar_reference_targets: {}
@@ -113,22 +113,22 @@ stats:
       http://hl7.org/fhir/StructureDefinition/structuredefinition-conformance-derivedFrom: 32
       http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status: 16
   Endpoint:
-    record_count_sampled: 50
+    record_count_sampled: 89
     fhir_id:
-      count: 50
-      uuid_count: 43
+      count: 89
+      uuid_count: 81
     arrays:
       Endpoint.extension[]:
         count_0: 0
-        count_1: 44
-        count_many: 2
-        pct_many: 0.043478260869565216
+        count_1: 82
+        count_many: 3
+        pct_many: 0.03529411764705882
         elem_types:
         - object
         reference_targets: {}
       Endpoint.extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 49
+        count_1: 87
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -136,15 +136,15 @@ stats:
         reference_targets: {}
       Endpoint.extension[].extension[]:
         count_0: 0
-        count_1: 2
+        count_1: 4
         count_many: 8
-        pct_many: 0.8
+        pct_many: 0.6666666666666666
         elem_types:
         - object
         reference_targets: {}
       Endpoint.extension[].extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 6
+        count_1: 8
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -152,7 +152,7 @@ stats:
         reference_targets: {}
       Endpoint.payloadType[]:
         count_0: 0
-        count_1: 50
+        count_1: 89
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -160,7 +160,7 @@ stats:
         reference_targets: {}
       Endpoint.payloadType[].coding[]:
         count_0: 0
-        count_1: 50
+        count_1: 89
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -169,14 +169,14 @@ stats:
       Endpoint.payloadMimeType[]:
         count_0: 0
         count_1: 0
-        count_many: 1
+        count_many: 2
         pct_many: 1.0
         elem_types:
         - text
         reference_targets: {}
       Endpoint.identifier[]:
         count_0: 0
-        count_1: 43
+        count_1: 81
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -184,7 +184,7 @@ stats:
         reference_targets: {}
       Endpoint.identifier[].extension[]:
         count_0: 0
-        count_1: 43
+        count_1: 81
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -201,7 +201,7 @@ stats:
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-associatedServers: 2
       associatedServersType: 2
       serverURL: 2
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-dynamicRegistration: 2
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-dynamicRegistration: 4
       version: 2
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-secureExchangeArtifacts: 2
       secureExchangeArtifactsType: 2
@@ -212,11 +212,12 @@ stats:
       qualifier: 2
       signedArtifact: 2
       publicCertificate: 2
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 44
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 82
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-connection-type-version: 1
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-rank: 1
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-ihe-specific-connection-type: 1
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 43
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 81
+      trustProfile: 2
   HealthcareService:
     record_count_sampled: 7
     fhir_id:
@@ -504,30 +505,30 @@ stats:
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 2
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 2
   Location:
-    record_count_sampled: 50
+    record_count_sampled: 100
     fhir_id:
-      count: 50
-      uuid_count: 37
+      count: 100
+      uuid_count: 87
     arrays:
       Location.extension[]:
         count_0: 0
-        count_1: 21
-        count_many: 29
-        pct_many: 0.58
+        count_1: 51
+        count_many: 49
+        pct_many: 0.49
         elem_types:
         - object
         reference_targets: {}
       Location.extension[].extension[]:
         count_0: 0
-        count_1: 20
+        count_1: 40
         count_many: 9
-        pct_many: 0.3103448275862069
+        pct_many: 0.1836734693877551
         elem_types:
         - object
         reference_targets: {}
       Location.extension[].extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 29
+        count_1: 49
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -535,7 +536,7 @@ stats:
         reference_targets: {}
       Location.extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 56
+        count_1: 106
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -583,9 +584,9 @@ stats:
         reference_targets: {}
       Location.address.line[]:
         count_0: 0
-        count_1: 43
-        count_many: 4
-        pct_many: 0.0851063829787234
+        count_1: 85
+        count_many: 12
+        pct_many: 0.12371134020618557
         elem_types:
         - text
         reference_targets: {}
@@ -607,15 +608,15 @@ stats:
         reference_targets: {}
       Location.identifier[]:
         count_0: 0
-        count_1: 40
+        count_1: 90
         count_many: 2
-        pct_many: 0.047619047619047616
+        pct_many: 0.021739130434782608
         elem_types:
         - object
         reference_targets: {}
       Location.identifier[].extension[]:
         count_0: 0
-        count_1: 44
+        count_1: 94
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -626,14 +627,14 @@ stats:
         Organization: 9
     extensions:
       http://hl7.org/fhir/StructureDefinition/location-boundary-geojson: 1
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-newpatients: 29
-      acceptingPatients: 29
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-newpatients: 49
+      acceptingPatients: 49
       fromNetwork: 8
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-accessibility: 13
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-via-intermediary: 1
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 43
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 93
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-newpatients-characteristics: 1
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 44
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 94
   Organization__pay:
     record_count_sampled: 3
     fhir_id:
@@ -1063,14 +1064,14 @@ stats:
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 4
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-org-description: 2
   Organization__prvgrp:
-    record_count_sampled: 28
+    record_count_sampled: 78
     fhir_id:
-      count: 28
-      uuid_count: 24
+      count: 78
+      uuid_count: 74
     arrays:
       Organization.identifier[]:
         count_0: 0
-        count_1: 28
+        count_1: 78
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1078,7 +1079,7 @@ stats:
         reference_targets: {}
       Organization.identifier[].extension[]:
         count_0: 0
-        count_1: 28
+        count_1: 78
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1086,7 +1087,7 @@ stats:
         reference_targets: {}
       Organization.type[]:
         count_0: 0
-        count_1: 28
+        count_1: 78
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1094,7 +1095,7 @@ stats:
         reference_targets: {}
       Organization.type[].coding[]:
         count_0: 0
-        count_1: 28
+        count_1: 78
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1102,9 +1103,9 @@ stats:
         reference_targets: {}
       Organization.telecom[]:
         count_0: 0
-        count_1: 0
-        count_many: 28
-        pct_many: 1.0
+        count_1: 4
+        count_many: 74
+        pct_many: 0.9487179487179487
         elem_types:
         - object
         reference_targets: {}
@@ -1126,16 +1127,16 @@ stats:
       Organization.address[]:
         count_0: 0
         count_1: 4
-        count_many: 24
-        pct_many: 0.8571428571428571
+        count_many: 74
+        pct_many: 0.9487179487179487
         elem_types:
         - object
         reference_targets: {}
       Organization.address[].line[]:
         count_0: 0
-        count_1: 50
-        count_many: 2
-        pct_many: 0.038461538461538464
+        count_1: 136
+        count_many: 16
+        pct_many: 0.10526315789473684
         elem_types:
         - text
         reference_targets: {}
@@ -1172,7 +1173,7 @@ stats:
         reference_targets: {}
       Organization.extension[]:
         count_0: 0
-        count_1: 26
+        count_1: 76
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1180,7 +1181,7 @@ stats:
         reference_targets: {}
       Organization.extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 26
+        count_1: 76
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1188,7 +1189,7 @@ stats:
         reference_targets: {}
       Organization.address[].extension[]:
         count_0: 0
-        count_1: 50
+        count_1: 150
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1197,7 +1198,7 @@ stats:
       Organization.address[].extension[].extension[]:
         count_0: 0
         count_1: 0
-        count_many: 50
+        count_many: 150
         pct_many: 1.0
         elem_types:
         - object
@@ -1237,11 +1238,11 @@ stats:
           Endpoint: 1
     scalar_reference_targets: {}
     extensions:
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 28
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 26
-      http://hl7.org/fhir/StructureDefinition/geolocation: 50
-      latitude: 50
-      longitude: 50
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 78
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 76
+      http://hl7.org/fhir/StructureDefinition/geolocation: 150
+      latitude: 150
+      longitude: 150
   Organization__govt:
     record_count_sampled: 2
     fhir_id:
@@ -1601,22 +1602,22 @@ stats:
     scalar_reference_targets: {}
     extensions: {}
   Practitioner:
-    record_count_sampled: 50
+    record_count_sampled: 100
     fhir_id:
-      count: 50
-      uuid_count: 46
+      count: 100
+      uuid_count: 96
     arrays:
       Practitioner.identifier[]:
         count_0: 0
         count_1: 4
-        count_many: 46
-        pct_many: 0.92
+        count_many: 96
+        pct_many: 0.96
         elem_types:
         - object
         reference_targets: {}
       Practitioner.identifier[].extension[]:
         count_0: 0
-        count_1: 142
+        count_1: 292
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1624,17 +1625,17 @@ stats:
         reference_targets: {}
       Practitioner.name[]:
         count_0: 0
-        count_1: 45
-        count_many: 5
-        pct_many: 0.1
+        count_1: 91
+        count_many: 9
+        pct_many: 0.09
         elem_types:
         - object
         reference_targets: {}
       Practitioner.name[].given[]:
         count_0: 0
-        count_1: 22
-        count_many: 33
-        pct_many: 0.6
+        count_1: 39
+        count_many: 70
+        pct_many: 0.6422018348623854
         elem_types:
         - text
         reference_targets: {}
@@ -1704,7 +1705,7 @@ stats:
         reference_targets: {}
       Practitioner.extension[]:
         count_0: 0
-        count_1: 49
+        count_1: 99
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1712,7 +1713,7 @@ stats:
         reference_targets: {}
       Practitioner.extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 49
+        count_1: 99
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1720,25 +1721,25 @@ stats:
         reference_targets: {}
       Practitioner.telecom[]:
         count_0: 0
-        count_1: 23
-        count_many: 21
-        pct_many: 0.4772727272727273
+        count_1: 44
+        count_many: 44
+        pct_many: 0.5
         elem_types:
         - object
         reference_targets: {}
       Practitioner.address[]:
         count_0: 0
         count_1: 0
-        count_many: 47
+        count_many: 97
         pct_many: 1.0
         elem_types:
         - object
         reference_targets: {}
       Practitioner.address[].line[]:
         count_0: 0
-        count_1: 81
-        count_many: 13
-        pct_many: 0.13829787234042554
+        count_1: 167
+        count_many: 27
+        pct_many: 0.13917525773195877
         elem_types:
         - text
         reference_targets: {}
@@ -1752,7 +1753,7 @@ stats:
         reference_targets: {}
       Practitioner.address[].extension[]:
         count_0: 0
-        count_1: 90
+        count_1: 187
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1761,14 +1762,14 @@ stats:
       Practitioner.address[].extension[].extension[]:
         count_0: 0
         count_1: 0
-        count_many: 90
+        count_many: 187
         pct_many: 1.0
         elem_types:
         - object
         reference_targets: {}
       Practitioner.name[].prefix[]:
         count_0: 0
-        count_1: 10
+        count_1: 28
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1776,7 +1777,7 @@ stats:
         reference_targets: {}
       Practitioner.name[].suffix[]:
         count_0: 0
-        count_1: 43
+        count_1: 89
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1784,32 +1785,32 @@ stats:
         reference_targets: {}
     scalar_reference_targets: {}
     extensions:
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 142
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 292
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-practitioner-qualification: 11
       status: 11
       whereValid: 11
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-communication-proficiency: 1
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 49
-      http://hl7.org/fhir/StructureDefinition/geolocation: 90
-      latitude: 90
-      longitude: 90
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 99
+      http://hl7.org/fhir/StructureDefinition/geolocation: 187
+      latitude: 187
+      longitude: 187
   PractitionerRole:
-    record_count_sampled: 50
+    record_count_sampled: 100
     fhir_id:
-      count: 50
-      uuid_count: 43
+      count: 100
+      uuid_count: 93
     arrays:
       PractitionerRole.extension[]:
         count_0: 0
-        count_1: 45
+        count_1: 95
         count_many: 5
-        pct_many: 0.1
+        pct_many: 0.05
         elem_types:
         - object
         reference_targets: {}
       PractitionerRole.extension[].valueCodeableConcept.coding[]:
         count_0: 0
-        count_1: 48
+        count_1: 98
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1817,7 +1818,7 @@ stats:
         reference_targets: {}
       PractitionerRole.identifier[]:
         count_0: 0
-        count_1: 46
+        count_1: 96
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1825,7 +1826,7 @@ stats:
         reference_targets: {}
       PractitionerRole.identifier[].extension[]:
         count_0: 0
-        count_1: 46
+        count_1: 96
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1833,9 +1834,9 @@ stats:
         reference_targets: {}
       PractitionerRole.telecom[]:
         count_0: 0
-        count_1: 26
-        count_many: 24
-        pct_many: 0.48
+        count_1: 56
+        count_many: 44
+        pct_many: 0.44
         elem_types:
         - object
         reference_targets: {}
@@ -1857,15 +1858,15 @@ stats:
         reference_targets: {}
       PractitionerRole.specialty[]:
         count_0: 0
-        count_1: 39
-        count_many: 8
-        pct_many: 0.1702127659574468
+        count_1: 81
+        count_many: 16
+        pct_many: 0.16494845360824742
         elem_types:
         - object
         reference_targets: {}
       PractitionerRole.specialty[].coding[]:
         count_0: 0
-        count_1: 57
+        count_1: 118
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1873,13 +1874,13 @@ stats:
         reference_targets: {}
       PractitionerRole.location[]:
         count_0: 0
-        count_1: 47
+        count_1: 97
         count_many: 0
         pct_many: 0.0
         elem_types:
         - Reference
         reference_targets:
-          Location: 47
+          Location: 97
       PractitionerRole.healthcareService[]:
         count_0: 0
         count_1: 4
@@ -1891,39 +1892,39 @@ stats:
           HealthcareService: 4
       PractitionerRole.endpoint[]:
         count_0: 0
-        count_1: 4
-        count_many: 3
-        pct_many: 0.42857142857142855
+        count_1: 6
+        count_many: 13
+        pct_many: 0.6842105263157895
         elem_types:
         - Reference
         reference_targets:
-          Endpoint: 13
+          Endpoint: 46
     scalar_reference_targets:
       PractitionerRole.practitioner.reference:
-        Practitioner: 50
+        Practitioner: 100
       PractitionerRole.organization.reference:
-        Organization: 6
+        Organization: 17
     extensions:
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 48
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status: 98
       http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-network-reference: 7
-      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 46
+      http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-identifier-status: 96
   SearchParameter:
-    record_count_sampled: 50
+    record_count_sampled: 54
     fhir_id:
-      count: 50
+      count: 54
       uuid_count: 0
     arrays:
       SearchParameter.extension[]:
         count_0: 0
         count_1: 0
-        count_many: 50
+        count_many: 54
         pct_many: 1.0
         elem_types:
         - object
         reference_targets: {}
       SearchParameter.extension[]._valueInteger.extension[]:
         count_0: 0
-        count_1: 50
+        count_1: 54
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1931,7 +1932,7 @@ stats:
         reference_targets: {}
       SearchParameter.extension[]._valueCode.extension[]:
         count_0: 0
-        count_1: 50
+        count_1: 54
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1939,7 +1940,7 @@ stats:
         reference_targets: {}
       SearchParameter.contact[]:
         count_0: 0
-        count_1: 50
+        count_1: 54
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1948,14 +1949,14 @@ stats:
       SearchParameter.contact[].telecom[]:
         count_0: 0
         count_1: 0
-        count_many: 50
+        count_many: 54
         pct_many: 1.0
         elem_types:
         - object
         reference_targets: {}
       SearchParameter.jurisdiction[]:
         count_0: 0
-        count_1: 50
+        count_1: 54
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1963,7 +1964,7 @@ stats:
         reference_targets: {}
       SearchParameter.jurisdiction[].coding[]:
         count_0: 0
-        count_1: 50
+        count_1: 54
         count_many: 0
         pct_many: 0.0
         elem_types:
@@ -1971,32 +1972,32 @@ stats:
         reference_targets: {}
       SearchParameter.base[]:
         count_0: 0
-        count_1: 49
+        count_1: 53
         count_many: 1
-        pct_many: 0.02
+        pct_many: 0.018518518518518517
         elem_types:
         - text
         reference_targets: {}
       SearchParameter.modifier[]:
         count_0: 0
-        count_1: 21
+        count_1: 24
         count_many: 7
-        pct_many: 0.25
+        pct_many: 0.22580645161290322
         elem_types:
         - text
         reference_targets: {}
       SearchParameter.target[]:
         count_0: 0
-        count_1: 19
-        count_many: 2
-        pct_many: 0.09523809523809523
+        count_1: 20
+        count_many: 3
+        pct_many: 0.13043478260869565
         elem_types:
         - text
         reference_targets: {}
       SearchParameter.chain[]:
         count_0: 0
         count_1: 0
-        count_many: 19
+        count_many: 20
         pct_many: 1.0
         elem_types:
         - text
@@ -2011,10 +2012,10 @@ stats:
         reference_targets: {}
     scalar_reference_targets: {}
     extensions:
-      http://hl7.org/fhir/StructureDefinition/structuredefinition-wg: 50
-      http://hl7.org/fhir/StructureDefinition/structuredefinition-fmm: 50
-      http://hl7.org/fhir/StructureDefinition/structuredefinition-conformance-derivedFrom: 100
-      http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status: 50
+      http://hl7.org/fhir/StructureDefinition/structuredefinition-wg: 54
+      http://hl7.org/fhir/StructureDefinition/structuredefinition-fmm: 54
+      http://hl7.org/fhir/StructureDefinition/structuredefinition-conformance-derivedFrom: 108
+      http://hl7.org/fhir/StructureDefinition/structuredefinition-standards-status: 54
   Subscription:
     record_count_sampled: 1
     fhir_id:

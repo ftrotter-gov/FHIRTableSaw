@@ -9,8 +9,10 @@ import yaml
 
 from fhir_tablesaw.config import ProfileConfig
 from fhir_tablesaw.ignore_extensions import IgnoreExtensions
-from fhir_tablesaw.naming import column_name_from_path, extension_table_name, to_snake
+from fhir_tablesaw.naming import column_name_from_path, to_snake
+from fhir_tablesaw.ndh_directory import infer_extension_field_name, is_directory_resource
 from fhir_tablesaw.stats import ProfileStats
+from fhir_tablesaw.stats import NUCC_TAXONOMY_SYSTEM
 from fhir_tablesaw.type_inference import reconcile_pg_types
 
 
@@ -30,8 +32,14 @@ class TableSchemaEmitter:
         many_pct_threshold = 0.10
         min_many_count = 25
 
-        # Determine shared component names across entities (ex: telecom)
-        shared_components = self._detect_shared_components(stats)
+        # NDH Directory mode: only keep a small allowlist of resources
+        stats = ProfileStats(
+            entities={
+                k: v
+                for k, v in stats.entities.items()
+                if is_directory_resource(k.split("__", 1)[0])
+            }
+        )
 
         doc: dict[str, Any] = {
             "version": "0.1",
@@ -50,7 +58,16 @@ class TableSchemaEmitter:
             entity_tables[entity] = self._emit_entity_table(entity, table, est)
             doc["tables"][table] = entity_tables[entity]
 
-        # Emit shared fact tables, child tables, and join tables from arrays
+            # Extensions become COLUMNS (no ext tables). Also detect taxonomy.
+            self._apply_extension_flattening(
+                entity=entity,
+                table_name=table,
+                est=est,
+                entity_table_doc=entity_tables[entity],
+                doc_tables=doc["tables"],
+            )
+
+        # Emit child/join tables from arrays (but do NOT create shared fact/component tables).
         for entity, est in stats.entities.items():
             parent_table = _entity_to_table(entity)
             resource_type = entity.split("__", 1)[0]
@@ -77,38 +94,10 @@ class TableSchemaEmitter:
                         )
                     continue
 
-                # Object arrays => flatten / child / shared-fact
+                # Object arrays => flatten / child
                 if "object" not in a.elem_types:
-                    # scalar arrays not handled in MVP: store as jsonb column at the entity level
-                    col_name = comp_snake
-                    entity_tables[entity]["columns"].append(
-                        {
-                            "name": col_name,
-                            "type": "jsonb",
-                            "nullable": True,
-                            "source": {"resource": resource_type, "path": arr_path},
-                            "notes": "Scalar/unknown array stored as jsonb (MVP)",
-                        }
-                    )
-                    continue
-
-                # Shared component inferred across multiple entity types
-                if comp in shared_components:
-                    # emit fact table if not already
-                    fact_table = shared_components[comp]["fact_table_name"]
-                    if fact_table not in doc["tables"]:
-                        doc["tables"][fact_table] = self._emit_fact_table_for_component(
-                            comp=comp,
-                            fact_table=fact_table,
-                            stats=stats,
-                        )
-
-                    join_table = f"{parent_table}_{fact_table}"
-                    doc["tables"][join_table] = self._emit_join_table(
-                        join_table=join_table,
-                        left_table=parent_table,
-                        right_table=fact_table,
-                    )
+                    # Do NOT store jsonb containers; fold as singleton columns via [0] when possible.
+                    # For MVP, we skip scalar arrays (or treat as text) to avoid hierarchy.
                     continue
 
                 # Decide flatten vs child table
@@ -144,19 +133,7 @@ class TableSchemaEmitter:
                     element_scalars=a.element_scalars,
                 )
 
-            # Extensions: create entity-specific extension tables
-            for url in sorted(est.extensions.keys()):
-                if self._ignore.matches(url):
-                    continue
-                suffix = secrets.token_hex(4)
-                ext_table = extension_table_name(parent_table, url, random_suffix=suffix)
-                if ext_table in doc["tables"]:
-                    continue
-                doc["tables"][ext_table] = self._emit_extension_table(
-                    ext_table=ext_table,
-                    parent_table=parent_table,
-                    url=url,
-                )
+            # Extensions: handled earlier as columns or taxonomy link tables
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(yaml.safe_dump(doc, sort_keys=False))
@@ -277,32 +254,97 @@ class TableSchemaEmitter:
 
         return table_doc
 
-    def _detect_shared_components(self, stats: ProfileStats) -> dict[str, Any]:
-        # component name => list of (entity, array_path)
-        comp_usage: DefaultDict[str, list[tuple[str, str]]] = defaultdict(list)
-        for entity, est in stats.entities.items():
-            resource_type = entity.split("__", 1)[0]
-            for arr_path, a in est.arrays.items():
-                if not arr_path.endswith("[]"):
-                    continue
-                # Ignore extension arrays; they are modeled separately.
-                if arr_path.endswith("extension[]"):
-                    continue
-                # consider only object arrays
-                if "object" not in a.elem_types and "Reference" not in a.elem_types:
-                    continue
-                # last segment before []
-                seg = arr_path.split(".")[-1].removesuffix("[]")
-                comp_usage[seg].append((entity, arr_path))
+    def _apply_extension_flattening(
+        self,
+        *,
+        entity: str,
+        table_name: str,
+        est: Any,
+        entity_table_doc: dict[str, Any],
+        doc_tables: dict[str, Any],
+    ) -> None:
+        """Convert extension shapes into either columns on the entity table or taxonomy link tables.
 
-        shared = {k: v for k, v in comp_usage.items() if len({e for e, _ in v}) >= 2}
-        out: dict[str, Any] = {}
-        for comp, usages in shared.items():
-            out[comp] = {
-                "fact_table_name": to_snake(comp),
-                "usages": usages,
-            }
-        return out
+        Key goals:
+        - Do not emit *_ext_* tables
+        - Do not store extension URLs as data columns
+        - Detect NUCC taxonomy (nucc.org/provider-taxonomy) and emit link tables
+        """
+
+        # 1) taxonomy link table (per entity table)
+        taxonomy_codes: set[str] = set()
+        for url, shape in (est.extension_shapes or {}).items():
+            taxonomy_codes.update(shape.nucc_taxonomy_codes_seen)
+
+        if taxonomy_codes:
+            tax_table = f"{table_name}_taxonomy"
+            id_col = f"{table_name}_id"
+            if tax_table not in doc_tables:
+                doc_tables[tax_table] = {
+                    "description": f"NUCC taxonomy codes extracted from extensions for {table_name}.",
+                    "primary_key": {"strategy": "surrogate", "columns": ["id"]},
+                    "columns": [
+                        {"name": "id", "type": "bigserial", "nullable": False},
+                        {"name": id_col, "type": "bigint", "nullable": False},
+                        {"name": "taxonomy_code", "type": "text", "nullable": False},
+                    ],
+                    "indexes": [
+                        {"name": f"{tax_table}_{id_col}_idx", "columns": [id_col]},
+                        {"name": f"{tax_table}_taxonomy_code_idx", "columns": ["taxonomy_code"]},
+                    ],
+                    "unique_constraints": [
+                        {
+                            "name": f"{tax_table}_uniq",
+                            "columns": [id_col, "taxonomy_code"],
+                            "nulls_not_distinct": True,
+                        }
+                    ],
+                }
+
+        # 2) singleton extension fields => columns
+        # Only use extensions that appear 0/1 per resource.
+        for url, shape in (est.extension_shapes or {}).items():
+            if self._ignore.matches(url):
+                continue
+            if shape.occurrences_max_per_resource > 1:
+                # repeating extension: we intentionally ignore/fold only first for now
+                continue
+
+            field = infer_extension_field_name(url)
+
+            # Special-case: if extension contains taxonomy system, handled by taxonomy table
+            if NUCC_TAXONOMY_SYSTEM in shape.coding_systems:
+                continue
+            for child_systems in (shape.child_coding_systems or {}).values():
+                if NUCC_TAXONOMY_SYSTEM in child_systems:
+                    # base-ext-qualification: skip column; taxonomy table covers
+                    continue
+
+            # Choose column type.
+            # valueString/valueCode => text; valueCodeableConcept => store coding[0].code as text
+            if "valueString" in shape.value_kinds or "valueCode" in shape.value_kinds:
+                col_type = "text"
+            elif "valueCodeableConcept" in shape.value_kinds or any(
+                "valueCodeableConcept" in ks for ks in (shape.child_value_kinds or {}).values()
+            ):
+                col_type = "text"
+            else:
+                continue
+
+            # Avoid duplicate column name clashes
+            existing = {c["name"] for c in entity_table_doc.get("columns") or []}
+            col_name = field
+            if col_name in existing:
+                continue
+
+            entity_table_doc["columns"].append(
+                {
+                    "name": col_name,
+                    "type": col_type,
+                    "nullable": True,
+                    "notes": f"Flattened from singleton extension {url}",
+                }
+            )
 
     def _emit_join_table(self, *, join_table: str, left_table: str, right_table: str) -> dict[str, Any]:
         return {
@@ -375,66 +417,4 @@ class TableSchemaEmitter:
             ],
         }
 
-    def _emit_fact_table_for_component(self, *, comp: str, fact_table: str, stats: ProfileStats) -> dict[str, Any]:
-        # Union element scalar fields across all entities where this component is present.
-        types_by_subpath: DefaultDict[str, set[str]] = defaultdict(set)
-        for entity, est in stats.entities.items():
-            for arr_path, a in est.arrays.items():
-                if not arr_path.endswith("[]"):
-                    continue
-                seg = arr_path.split(".")[-1].removesuffix("[]")
-                if seg != comp:
-                    continue
-                for subpath, es in a.element_scalars.items():
-                    if not subpath or "[]" in subpath:
-                        continue
-                    types_by_subpath[subpath].update(es.types_seen)
-
-        cols = [{"name": "id", "type": "bigserial", "nullable": False}]
-        uniq_cols: list[str] = []
-        for subpath, types in sorted(types_by_subpath.items()):
-            col = to_snake(subpath)
-            cols.append({"name": col, "type": reconcile_pg_types(set(types)), "nullable": True})
-            uniq_cols.append(col)
-
-        return {
-            "description": f"Shared fact table inferred for component `{comp}`.",
-            "primary_key": {"strategy": "surrogate", "columns": ["id"]},
-            "columns": cols,
-            "indexes": [],
-            "unique_constraints": [
-                {
-                    "name": f"{fact_table}_uniq",
-                    "columns": uniq_cols or ["id"],
-                    "nulls_not_distinct": True,
-                }
-            ],
-        }
-
-    def _emit_extension_table(self, *, ext_table: str, parent_table: str, url: str) -> dict[str, Any]:
-        parent_col = f"{parent_table}_parent_id"
-        return {
-            "description": f"Extension table for {parent_table} ({url}).",
-            "primary_key": {"strategy": "surrogate", "columns": ["id"]},
-            "columns": [
-                {"name": "id", "type": "bigserial", "nullable": False},
-                {"name": parent_col, "type": "bigint", "nullable": False},
-                {"name": "extension_url", "type": "text", "nullable": False, "default": url},
-                {
-                    "name": "value_json",
-                    "type": "jsonb",
-                    "nullable": True,
-                    "notes": "MVP stores extension payload as jsonb; future work may flatten value[x]",
-                },
-            ],
-            "indexes": [
-                {"name": f"{ext_table}_{parent_col}_idx", "columns": [parent_col]},
-            ],
-            "unique_constraints": [
-                {
-                    "name": f"{ext_table}_uniq",
-                    "columns": [parent_col, "extension_url", "value_json"],
-                    "nulls_not_distinct": True,
-                }
-            ],
-        }
+    # NOTE: shared component tables and extension tables intentionally removed in NDH Directory mode.

@@ -72,6 +72,28 @@ def test_organization_subtyping_creates_independent_tables(tmp_path: Path) -> No
                 ],
             }
         ],
+
+        # Include a non-ignored extension that carries a NUCC taxonomy code.
+        # This should drive creation of `organization_pay_taxonomy`.
+        "extension": [
+            {
+                "url": "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-qualification",
+                "extension": [
+                    {
+                        "url": "code",
+                        "valueCodeableConcept": {
+                            "coding": [
+                                {
+                                    "system": "http://nucc.org/provider-taxonomy",
+                                    "code": "305R00000X",
+                                    "display": "Preferred Provider Organization",
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        ],
     }
 
     p.consume_resources("Organization", [org])
@@ -90,6 +112,9 @@ def test_organization_subtyping_creates_independent_tables(tmp_path: Path) -> No
     assert "organization_pay" in tables
     # Ignored extension should not produce any extension table with availabletime
     assert not any("availabletime" in t for t in tables.keys())
+
+    # The new flattener should also infer a taxonomy table for this subtype
+    assert "organization_pay_taxonomy" in tables
 
 
 def test_organization_multiple_type_codes_emit_multiple_subtype_entities(tmp_path: Path) -> None:
