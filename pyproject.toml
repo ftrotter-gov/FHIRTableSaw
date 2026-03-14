@@ -14,6 +14,10 @@ authors = [{ name = "DSACMS" }]
 dependencies = [
   "httpx>=0.27.0",
   "PyYAML>=6.0.1",
+  "SQLAlchemy>=2.0.30",
+  "pydantic>=2.7.0",
+  "fhir-core>=1.1.3",
+  "psycopg[binary]>=3.2.0",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +28,7 @@ dev = [
 
 [project.scripts]
 fhir-tablesaw = "fhir_tablesaw.cli:main"
+fhir-tablesaw-3tier = "fhir_tablesaw_3tier.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
