@@ -3,6 +3,9 @@ import json
 import sys
 
 from fhir_tablesaw_3tier.fhir.practitioner import practitioner_from_fhir_json
+from fhir_tablesaw_3tier.fhir.organization_clinical import (
+    clinical_organization_from_fhir_json,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,6 +27,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Base URL of FHIR server (used for reference resolution)",
     )
 
+    parse_org = sub.add_parser(
+        "parse-clinical-organization", help="Parse Clinical Organization (FHIR Organization JSON)"
+    )
+    parse_org.add_argument("--input", required=True, help="Path to Organization JSON file")
+    parse_org.add_argument(
+        "--fhir-server-url",
+        required=False,
+        default=None,
+        help="Base URL of FHIR server (used for reference resolution)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.cmd == "parse-practitioner":
@@ -36,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
         print(practitioner.model_dump_json(indent=2, exclude_none=True))
 
         # Print dropped-repeat report
+        print("\n--- dropped-repeats report ---")
+        print(report.to_text())
+        return 0
+
+    if args.cmd == "parse-clinical-organization":
+        raw = json.loads(open(args.input, "r", encoding="utf-8").read())
+        org, report = clinical_organization_from_fhir_json(raw, fhir_server_url=args.fhir_server_url)
+        print(org.model_dump_json(indent=2, exclude_none=True))
         print("\n--- dropped-repeats report ---")
         print(report.to_text())
         return 0

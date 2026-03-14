@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fhir_core.fhirabstractmodel import FHIRAbstractModel
-from fhir_core.types import BooleanType, CodeType, IdType, StringType, UrlType
+from fhir_core.types import BooleanType, CodeType, IdType, IntegerType, StringType, UrlType
 from pydantic import Field
 
 
@@ -98,11 +98,17 @@ class Extension(Element):
     valueBoolean: BooleanType | None = Field(
         None, alias="valueBoolean", json_schema_extra={"element_property": True}
     )
+    valueInteger: IntegerType | None = Field(
+        None, alias="valueInteger", json_schema_extra={"element_property": True}
+    )
     valueCode: CodeType | None = Field(
         None, alias="valueCode", json_schema_extra={"element_property": True}
     )
     valueString: StringType | None = Field(
         None, alias="valueString", json_schema_extra={"element_property": True}
+    )
+    valueUrl: UrlType | None = Field(
+        None, alias="valueUrl", json_schema_extra={"element_property": True}
     )
     valueCoding: Coding | None = Field(
         None, alias="valueCoding", json_schema_extra={"element_property": True}
@@ -118,8 +124,10 @@ class Extension(Element):
             "extension",
             "url",
             "valueBoolean",
+            "valueInteger",
             "valueCode",
             "valueString",
+            "valueUrl",
             "valueCoding",
             "valueReference",
         ]
@@ -275,3 +283,123 @@ class PractitionerResource(Resource):
             "qualification",
             "specialty",
         ]
+
+
+# --- Organization (minimal) ---
+
+
+class Meta(Element):
+    __resource_type__ = "Meta"
+
+    profile: list[UrlType] | None = Field(
+        None, alias="profile", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return ["id", "extension", "profile"]
+
+
+class OrganizationType(Element):
+    __resource_type__ = "OrganizationType"
+
+    coding: list[Coding] | None = Field(
+        None, alias="coding", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return ["id", "extension", "coding"]
+
+
+class OrganizationContact(Element):
+    __resource_type__ = "OrganizationContact"
+
+    name: HumanName | None = Field(
+        None, alias="name", json_schema_extra={"element_property": True}
+    )
+    telecom: list[ContactPoint] | None = Field(
+        None, alias="telecom", json_schema_extra={"element_property": True}
+    )
+    address: Address | None = Field(
+        None, alias="address", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return ["id", "extension", "name", "telecom", "address"]
+
+
+class OrganizationResource(Resource):
+    __resource_type__ = "Organization"
+
+    meta: Meta | None = Field(None, alias="meta", json_schema_extra={"element_property": True})
+
+    active: BooleanType | None = Field(
+        None, alias="active", json_schema_extra={"element_property": True}
+    )
+    name: StringType | None = Field(
+        None, alias="name", json_schema_extra={"element_property": True}
+    )
+    alias: list[StringType] | None = Field(
+        None, alias="alias", json_schema_extra={"element_property": True}
+    )
+    alias__ext: list[Element] | None = Field(
+        None, alias="_alias", json_schema_extra={"element_property": True}
+    )
+    description: StringType | None = Field(
+        None, alias="description", json_schema_extra={"element_property": True}
+    )
+
+    identifier: list[Identifier] | None = Field(
+        None, alias="identifier", json_schema_extra={"element_property": True}
+    )
+    telecom: list[ContactPoint] | None = Field(
+        None, alias="telecom", json_schema_extra={"element_property": True}
+    )
+    address: list[Address] | None = Field(
+        None, alias="address", json_schema_extra={"element_property": True}
+    )
+
+    partOf: Reference | None = Field(
+        None, alias="partOf", json_schema_extra={"element_property": True}
+    )
+    contact: list[OrganizationContact] | None = Field(
+        None, alias="contact", json_schema_extra={"element_property": True}
+    )
+
+    endpoint: list[Reference] | None = Field(
+        None, alias="endpoint", json_schema_extra={"element_property": True}
+    )
+
+    type: list[OrganizationType] | None = Field(
+        None, alias="type", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "meta",
+            "extension",
+            "active",
+            "type",
+            "name",
+            "alias",
+            "_alias",
+            "description",
+            "identifier",
+            "telecom",
+            "address",
+            "partOf",
+            "contact",
+            "endpoint",
+        ]
+
+    @classmethod
+    def get_alias_mapping(cls) -> dict[str, str]:
+        # Override the base alias mapping so that the JSON property `_alias` maps to
+        # our python field name `alias__ext`.
+        mapping = super().get_alias_mapping()
+        mapping["_alias"] = "alias__ext"
+        return mapping

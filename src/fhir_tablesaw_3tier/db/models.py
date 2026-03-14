@@ -224,3 +224,106 @@ Index(
     PractitionerVerificationResultRow.verification_result_id,
     unique=True,
 )
+
+
+# --- Clinical Organization (subtype-specific table per instruction) ---
+
+
+class ClinicalOrganizationRow(Base):
+    __tablename__ = "clinical_organization"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    resource_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
+    npi: Mapped[str] = mapped_column(String, nullable=False)
+    active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    logo_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    rating: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    cms_pecos_validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    cms_ial2_validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    has_cms_aligned_data_network: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    parent_organization_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    parent_resource_uuid: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    # exactly one contact, flattened
+    contact_first_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_last_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_fax: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_address_line1: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_address_line2: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_city: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_state: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_postal_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    contact_country: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index("ix_clinical_org_resource_uuid", ClinicalOrganizationRow.resource_uuid, unique=True)
+Index("ix_clinical_org_npi", ClinicalOrganizationRow.npi, unique=True)
+
+
+class ClinicalOrganizationAliasRow(Base):
+    __tablename__ = "clinical_organization_alias"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    clinical_organization_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    alias: Mapped[str] = mapped_column(String, nullable=False)
+    alias_type: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index(
+    "ix_clinical_org_alias_org",
+    ClinicalOrganizationAliasRow.clinical_organization_id,
+)
+
+
+class ClinicalOrganizationTelecomRow(Base):
+    __tablename__ = "clinical_organization_telecom"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    clinical_organization_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # phone|fax
+    value: Mapped[str] = mapped_column(String, nullable=False)
+
+
+Index(
+    "ix_clinical_org_telecom_org",
+    ClinicalOrganizationTelecomRow.clinical_organization_id,
+)
+
+
+class ClinicalOrganizationAddressRow(Base):
+    __tablename__ = "clinical_organization_address"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    clinical_organization_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    address_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+Index(
+    "ix_clinical_org_address_pair",
+    ClinicalOrganizationAddressRow.clinical_organization_id,
+    ClinicalOrganizationAddressRow.address_id,
+    unique=True,
+)
+
+
+class ClinicalOrganizationEndpointRow(Base):
+    __tablename__ = "clinical_organization_endpoint"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    clinical_organization_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    endpoint_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+Index(
+    "ix_clinical_org_endpoint_pair",
+    ClinicalOrganizationEndpointRow.clinical_organization_id,
+    ClinicalOrganizationEndpointRow.endpoint_id,
+    unique=True,
+)

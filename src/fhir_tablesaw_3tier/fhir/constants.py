@@ -14,3 +14,25 @@ NDH_ENDPOINT_REFERENCE_EXT_URL = (
 NDH_COMM_PROFICIENCY_EXT_URL = (
     "https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinition-base-ext-communication-proficiency.html"
 )
+
+# --- Clinical Organization placeholders / NDH URLs ---
+
+# NDH Logo extension (real URL provided)
+NDH_LOGO_EXT_URL = "https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinition-base-ext-logo.html"
+
+# Placeholder extension URLs (per instruction)
+ORG_ALIAS_TYPE_EXT_URL = "https://example.com/extension_url/org-alias-type"
+ORG_RATING_EXT_URL = "https://example.com/extension_url/rating"
+
+ORG_CMS_PECOS_VALIDATED_EXT_URL = "https://example.com/extension_url/cms_pecos_validated"
+ORG_CMS_IAL2_VALIDATED_EXT_URL = "https://example.com/extension_url/cms_ial2_validated"
+ORG_HAS_CMS_ALIGNED_DATA_NETWORK_EXT_URL = (
+    "https://example.com/extension_url/has_cms_aligned_data_network"
+)
+
+# FHIR org type coding
+HL7_ORG_TYPE_SYSTEM = "http://terminology.hl7.org/CodeSystem/organization-type"
+HL7_ORG_TYPE_PROV_CODE = "prov"
+
+# NDH Organization profile URL (hardcode per instruction)
+NDH_ORGANIZATION_PROFILE_URL = "http://hl7.org/fhir/us/ndh/StructureDefinition/ndh-Organization"
