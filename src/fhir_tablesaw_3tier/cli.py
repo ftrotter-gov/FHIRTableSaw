@@ -101,6 +101,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Stop after ingesting N resources of each type (debugging)",
     )
 
+    slurp.add_argument(
+        "--log-dir",
+        default=None,
+        help="Directory to write parse/persist failure artifacts (default: ./log or $FHIR_TABLESAW_SLURP_LOG_DIR)",
+    )
+
     reset = sub.add_parser(
         "reset-db",
         help="Drop all 3-tier tables and recreate them (WIPE DATA)",
@@ -165,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
             create_schema=not args.no_create_schema,
             count=args.count,
             hard_limit=args.hard_limit,
+            log_dir=args.log_dir,
         )
         return 0
 
