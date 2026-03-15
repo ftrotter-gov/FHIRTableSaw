@@ -97,6 +97,25 @@ class Reference(Element):
         return ["id", "extension", "reference", "display"]
 
 
+class Attachment(Element):
+    __resource_type__ = "Attachment"
+
+    contentType: StringType | None = Field(
+        None, alias="contentType", json_schema_extra={"element_property": True}
+    )
+    url: StringType | None = Field(None, alias="url", json_schema_extra={"element_property": True})
+    data: StringType | None = Field(
+        None, alias="data", json_schema_extra={"element_property": True}
+    )
+    title: StringType | None = Field(
+        None, alias="title", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return ["id", "extension", "contentType", "url", "data", "title"]
+
+
 class Extension(Element):
     __resource_type__ = "Extension"
 
@@ -125,6 +144,14 @@ class Extension(Element):
         None, alias="valueReference", json_schema_extra={"element_property": True}
     )
 
+    # Needed for NDH + Location.
+    valueCodeableConcept: CodeableConcept | None = Field(
+        None, alias="valueCodeableConcept", json_schema_extra={"element_property": True}
+    )
+    valueAttachment: Attachment | None = Field(
+        None, alias="valueAttachment", json_schema_extra={"element_property": True}
+    )
+
     @classmethod
     def elements_sequence(cls) -> list[str]:
         return [
@@ -138,6 +165,8 @@ class Extension(Element):
             "valueUrl",
             "valueCoding",
             "valueReference",
+            "valueCodeableConcept",
+            "valueAttachment",
         ]
 
 
@@ -499,6 +528,10 @@ class OrganizationAffiliationResource(Resource):
         None, alias="telecom", json_schema_extra={"element_property": True}
     )
 
+    endpoint: list[Reference] | None = Field(
+        None, alias="endpoint", json_schema_extra={"element_property": True}
+    )
+
     # Explicitly exclude location/healthcareService for now (not modeled).
 
     @classmethod
@@ -512,4 +545,146 @@ class OrganizationAffiliationResource(Resource):
             "code",
             "specialty",
             "telecom",
+            "endpoint",
+        ]
+
+
+# --- Endpoint (minimal, NDH focused) ---
+
+
+class EndpointResource(Resource):
+    __resource_type__ = "Endpoint"
+
+    status: CodeType | None = Field(
+        None, alias="status", json_schema_extra={"element_property": True}
+    )
+    connectionType: Coding | None = Field(
+        None, alias="connectionType", json_schema_extra={"element_property": True}
+    )
+    name: StringType | None = Field(
+        None, alias="name", json_schema_extra={"element_property": True}
+    )
+    payloadType: list[CodeableConcept] | None = Field(
+        None, alias="payloadType", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "extension",
+            "status",
+            "connectionType",
+            "name",
+            "payloadType",
+        ]
+
+
+# --- Location (minimal, NDH focused) ---
+
+
+class LocationPosition(Element):
+    __resource_type__ = "LocationPosition"
+
+    latitude: StringType | float | None = Field(
+        None, alias="latitude", json_schema_extra={"element_property": True}
+    )
+    longitude: StringType | float | None = Field(
+        None, alias="longitude", json_schema_extra={"element_property": True}
+    )
+    altitude: StringType | float | None = Field(
+        None, alias="altitude", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return ["id", "extension", "latitude", "longitude", "altitude"]
+
+
+class LocationHoursOfOperation(Element):
+    __resource_type__ = "LocationHoursOfOperation"
+
+    daysOfWeek: list[CodeType] | None = Field(
+        None, alias="daysOfWeek", json_schema_extra={"element_property": True}
+    )
+    allDay: BooleanType | None = Field(
+        None, alias="allDay", json_schema_extra={"element_property": True}
+    )
+    openingTime: StringType | None = Field(
+        None, alias="openingTime", json_schema_extra={"element_property": True}
+    )
+    closingTime: StringType | None = Field(
+        None, alias="closingTime", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "extension",
+            "daysOfWeek",
+            "allDay",
+            "openingTime",
+            "closingTime",
+        ]
+
+
+class LocationResource(Resource):
+    __resource_type__ = "Location"
+
+    status: CodeType | None = Field(
+        None, alias="status", json_schema_extra={"element_property": True}
+    )
+    name: StringType | None = Field(
+        None, alias="name", json_schema_extra={"element_property": True}
+    )
+    description: StringType | None = Field(
+        None, alias="description", json_schema_extra={"element_property": True}
+    )
+
+    address: Address | None = Field(
+        None, alias="address", json_schema_extra={"element_property": True}
+    )
+    telecom: list[ContactPoint] | None = Field(
+        None, alias="telecom", json_schema_extra={"element_property": True}
+    )
+
+    managingOrganization: Reference | None = Field(
+        None, alias="managingOrganization", json_schema_extra={"element_property": True}
+    )
+    partOf: Reference | None = Field(
+        None, alias="partOf", json_schema_extra={"element_property": True}
+    )
+
+    position: LocationPosition | None = Field(
+        None, alias="position", json_schema_extra={"element_property": True}
+    )
+
+    hoursOfOperation: list[LocationHoursOfOperation] | None = Field(
+        None, alias="hoursOfOperation", json_schema_extra={"element_property": True}
+    )
+    availabilityExceptions: StringType | None = Field(
+        None, alias="availabilityExceptions", json_schema_extra={"element_property": True}
+    )
+
+    endpoint: list[Reference] | None = Field(
+        None, alias="endpoint", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "extension",
+            "status",
+            "name",
+            "description",
+            "address",
+            "telecom",
+            "managingOrganization",
+            "partOf",
+            "position",
+            "hoursOfOperation",
+            "availabilityExceptions",
+            "endpoint",
         ]

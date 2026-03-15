@@ -111,6 +111,12 @@ def organization_affiliation_from_fhir_json(
             continue
         telecoms.append(AffiliationTelecom(type=str(t.system), value=str(t.value)))
 
+    # endpoints
+    endpoints: list[dict] = []
+    for r in list(getattr(fhir, "endpoint", None) or []):
+        if r.reference:
+            endpoints.append({"resource_uuid": str(r.reference).split("/")[-1]})
+
     canonical = OrganizationAffiliation(
         resource_uuid=resource_uuid,
         active=bool(fhir.active) if fhir.active is not None else None,
@@ -119,6 +125,7 @@ def organization_affiliation_from_fhir_json(
         code=aff_code,
         specialties=specialties,
         telecoms=telecoms,
+        endpoints=endpoints,
     )
 
     return canonical, report
@@ -136,6 +143,12 @@ def organization_affiliation_to_fhir_json(aff: OrganizationAffiliation) -> dict[
     specialty_cc = [CodeableConcept(coding=[Coding(code=s.code)]) for s in aff.specialties]
     telecom = [ContactPoint(system=t.type, value=t.value) for t in aff.telecoms]
 
+    endpoint = [
+        Reference(reference=f"Endpoint/{e['resource_uuid']}")
+        for e in (getattr(aff, "endpoints", []) or [])
+        if isinstance(e, dict) and e.get("resource_uuid")
+    ]
+
     fhir = OrganizationAffiliationResource(
         id=aff.resource_uuid,
         active=aff.active,
@@ -146,6 +159,7 @@ def organization_affiliation_to_fhir_json(aff: OrganizationAffiliation) -> dict[
         code=[code_cc],
         specialty=specialty_cc or None,
         telecom=telecom or None,
+        endpoint=endpoint or None,
     )
 
     return fhir.model_dump(by_alias=True, exclude_none=True)

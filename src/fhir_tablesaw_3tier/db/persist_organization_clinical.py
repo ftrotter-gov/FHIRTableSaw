@@ -167,7 +167,11 @@ def save_clinical_organization(
             select(EndpointRow).where(EndpointRow.resource_uuid == euuid)
         ).scalar_one_or_none()
         if erow is None:
-            erow = EndpointRow(resource_uuid=euuid, raw_json=None)
+            erow = EndpointRow(
+                resource_uuid=euuid,
+                status="active",
+                connection_type_code="(placeholder)",
+            )
             session.add(erow)
             session.flush()
         join = session.execute(

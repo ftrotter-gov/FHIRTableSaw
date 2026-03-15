@@ -85,11 +85,42 @@ class EndpointRow(Base):
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     resource_uuid: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    # Minimal representation for now: store raw address and connection info later.
+
+    status: Mapped[str] = mapped_column(String, nullable=False)
+
+    connection_type_system: Mapped[str | None] = mapped_column(String, nullable=True)
+    connection_type_code: Mapped[str] = mapped_column(String, nullable=False)
+    connection_type_display: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    endpoint_rank: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
     raw_json: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 Index("ix_endpoint_resource_uuid", EndpointRow.resource_uuid, unique=True)
+
+
+class EndpointPayloadTypeRow(Base):
+    __tablename__ = "endpoint_payload_type"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    endpoint_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    payload_system: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload_code: Mapped[str] = mapped_column(String, nullable=False)
+    payload_display: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index("ix_endpoint_payload_endpoint", EndpointPayloadTypeRow.endpoint_id)
+Index(
+    "ix_endpoint_payload_uniq",
+    EndpointPayloadTypeRow.endpoint_id,
+    EndpointPayloadTypeRow.payload_system,
+    EndpointPayloadTypeRow.payload_code,
+    EndpointPayloadTypeRow.payload_display,
+    unique=True,
+)
 
 
 class PractitionerEndpointRow(Base):
@@ -104,6 +135,22 @@ Index(
     "ix_practitioner_endpoint_pair",
     PractitionerEndpointRow.practitioner_id,
     PractitionerEndpointRow.endpoint_id,
+    unique=True,
+)
+
+
+class OrganizationAffiliationEndpointRow(Base):
+    __tablename__ = "organization_affiliation_endpoint"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    organization_affiliation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    endpoint_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+Index(
+    "ix_org_affiliation_endpoint_pair",
+    OrganizationAffiliationEndpointRow.organization_affiliation_id,
+    OrganizationAffiliationEndpointRow.endpoint_id,
     unique=True,
 )
 

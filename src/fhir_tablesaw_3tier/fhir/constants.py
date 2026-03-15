@@ -72,3 +72,11 @@ NDH_LOCATION_VERIFICATION_STATUS_EXT_URL = (
 
 # Core FHIR extension used by NDH Location
 LOCATION_BOUNDARY_GEOJSON_EXT_URL = "http://hl7.org/fhir/StructureDefinition/location-boundary-geojson"
+
+
+# --- Endpoint / NDH Endpoint ---
+
+NDH_ENDPOINT_PROFILE_URL = "http://hl7.org/fhir/us/ndh/StructureDefinition/ndh-Endpoint"
+
+# Endpoint rank extension slice used by NDH Endpoint
+NDH_ENDPOINT_RANK_EXT_URL = "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-rank"

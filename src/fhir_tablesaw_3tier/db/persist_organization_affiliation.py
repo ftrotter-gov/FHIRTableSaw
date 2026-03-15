@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from fhir_tablesaw_3tier.db.models import (
+    EndpointRow,
+    OrganizationAffiliationEndpointRow,
     OrganizationAffiliationRow,
     OrganizationAffiliationSpecialtyRow,
     OrganizationAffiliationTelecomRow,
@@ -100,6 +102,39 @@ def save_organization_affiliation(
                 )
             )
 
+    # endpoints (if present): ensure endpoint rows exist + join
+    for e in getattr(aff, "endpoints", []) or []:
+        endpoint_uuid = e.get("resource_uuid") if isinstance(e, dict) else getattr(e, "resource_uuid", None)
+        if not endpoint_uuid:
+            continue
+        euuid = ensure_uuid(endpoint_uuid)
+
+        erow = session.execute(
+            select(EndpointRow).where(EndpointRow.resource_uuid == euuid)
+        ).scalar_one_or_none()
+        if erow is None:
+            erow = EndpointRow(
+                resource_uuid=euuid,
+                status="active",
+                connection_type_code="(placeholder)",
+            )
+            session.add(erow)
+            session.flush()
+
+        ejoin = session.execute(
+            select(OrganizationAffiliationEndpointRow).where(
+                OrganizationAffiliationEndpointRow.organization_affiliation_id == aff_id,
+                OrganizationAffiliationEndpointRow.endpoint_id == int(erow.id),
+            )
+        ).scalar_one_or_none()
+        if ejoin is None:
+            session.add(
+                OrganizationAffiliationEndpointRow(
+                    organization_affiliation_id=aff_id,
+                    endpoint_id=int(erow.id),
+                )
+            )
+
     session.flush()
     return aff.model_copy(
         update={
@@ -146,6 +181,15 @@ def load_organization_affiliation_by_uuid(
 
     telecoms = [{"type": str(t.type), "value": str(t.value)} for _, t in tel_rows]
 
+    # endpoints
+    ep_rows = session.execute(
+        select(OrganizationAffiliationEndpointRow, EndpointRow)
+        .where(OrganizationAffiliationEndpointRow.organization_affiliation_id == int(row.id))
+        .where(OrganizationAffiliationEndpointRow.endpoint_id == EndpointRow.id)
+    ).all()
+
+    endpoints = [{"resource_uuid": str(e.resource_uuid)} for _, e in ep_rows]
+
     return OrganizationAffiliation(
         id=int(row.id),
         resource_uuid=str(row.resource_uuid),
@@ -161,4 +205,5 @@ def load_organization_affiliation_by_uuid(
         },
         specialties=specialties,
         telecoms=telecoms,
+        endpoints=endpoints,
     )

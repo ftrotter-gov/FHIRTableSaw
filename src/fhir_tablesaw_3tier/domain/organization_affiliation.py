@@ -50,6 +50,10 @@ class OrganizationAffiliation(CanonicalBase):
     specialties: list[Specialty] = Field(default_factory=list)
     telecoms: list[AffiliationTelecom] = Field(default_factory=list)
 
+    # NDH allows endpoints; Endpoint.md says OrganizationAffiliation is an allowed
+    # link target. We store only references here.
+    endpoints: list[dict] = Field(default_factory=list)
+
 
 class DroppedRepeatsReport(BaseModel):
     model_config = ConfigDict(extra="forbid")

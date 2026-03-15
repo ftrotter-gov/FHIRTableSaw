@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from fhir_tablesaw_3tier.db.models import (
     EndpointRow,
+    EndpointPayloadTypeRow,
     HealthcareServiceRow,
     LocationRow,
     OrganizationRow,
@@ -161,7 +162,13 @@ def save_practitioner_role(session: Session, role: PractitionerRole) -> Practiti
         euuid = ensure_uuid(e.resource_uuid)
         erow = session.execute(select(EndpointRow).where(EndpointRow.resource_uuid == euuid)).scalar_one_or_none()
         if erow is None:
-            erow = EndpointRow(resource_uuid=euuid, raw_json=None)
+            # Endpoint now has required scalar columns. Use placeholders when
+            # referenced before full Endpoint persistence.
+            erow = EndpointRow(
+                resource_uuid=euuid,
+                status="active",
+                connection_type_code="(placeholder)",
+            )
             session.add(erow)
             session.flush()
         join = session.execute(
