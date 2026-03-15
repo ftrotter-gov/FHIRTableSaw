@@ -356,10 +356,79 @@ class LocationRow(Base):
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     resource_uuid: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+
+    # Core
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    availability_exceptions: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Relationships (no FKs)
+    managing_organization_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    part_of_location_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Exactly one address per Location.md; NDH allows 0..1, so nullable.
+    address_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Position
+    latitude: Mapped[str | None] = mapped_column(String, nullable=True)
+    longitude: Mapped[str | None] = mapped_column(String, nullable=True)
+    altitude: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Boundary GeoJSON (compressed as text)
+    boundary_geojson: Mapped[str | None] = mapped_column(String, nullable=True)
+
     raw_json: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 Index("ix_location_resource_uuid", LocationRow.resource_uuid, unique=True)
+Index("ix_location_managing_org", LocationRow.managing_organization_id)
+Index("ix_location_part_of", LocationRow.part_of_location_id)
+Index("ix_location_address", LocationRow.address_id)
+
+
+class LocationTelecomRow(Base):
+    __tablename__ = "location_telecom"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    location_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    telecom_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+Index("ix_location_telecom_location", LocationTelecomRow.location_id)
+Index(
+    "ix_location_telecom_pair",
+    LocationTelecomRow.location_id,
+    LocationTelecomRow.telecom_id,
+    unique=True,
+)
+
+
+class LocationHoursOfOperationRow(Base):
+    __tablename__ = "location_hours_of_operation"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    location_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    all_day: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    opening_time: Mapped[str | None] = mapped_column(String, nullable=True)
+    closing_time: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index("ix_location_hours_location", LocationHoursOfOperationRow.location_id)
+
+
+class LocationAccessibilityRow(Base):
+    __tablename__ = "location_accessibility"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
+    location_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    code_system: Mapped[str | None] = mapped_column(String, nullable=True)
+    code_code: Mapped[str] = mapped_column(String, nullable=False)
+    code_display: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index("ix_location_accessibility_location", LocationAccessibilityRow.location_id)
 
 
 class HealthcareServiceRow(Base):

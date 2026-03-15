@@ -53,3 +53,22 @@ HL7_ORG_TYPE_PROV_CODE = "prov"
 
 # NDH Organization profile URL (hardcode per instruction)
 NDH_ORGANIZATION_PROFILE_URL = "http://hl7.org/fhir/us/ndh/StructureDefinition/ndh-Organization"
+
+
+# --- Location / NDH Location ---
+
+NDH_LOCATION_PROFILE_URL = "http://hl7.org/fhir/us/ndh/StructureDefinition/ndh-Location"
+
+# NDH Location extension URLs (fixedUri on the extension SDs)
+NDH_LOCATION_ACCESSIBILITY_EXT_URL = (
+    "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-accessibility"
+)
+NDH_LOCATION_NEWPATIENTS_EXT_URL = (
+    "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-newpatients"
+)
+NDH_LOCATION_VERIFICATION_STATUS_EXT_URL = (
+    "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status"
+)
+
+# Core FHIR extension used by NDH Location
+LOCATION_BOUNDARY_GEOJSON_EXT_URL = "http://hl7.org/fhir/StructureDefinition/location-boundary-geojson"

@@ -51,7 +51,9 @@ def _ensure_location_id(session: Session, location_uuid: str | uuid.UUID) -> int
     luuid = ensure_uuid(location_uuid)
     row = session.execute(select(LocationRow).where(LocationRow.resource_uuid == luuid)).scalar_one_or_none()
     if row is None:
-        row = LocationRow(resource_uuid=luuid, raw_json=None)
+        # Location now has required status/name columns. Use placeholders when
+        # referenced before full Location persistence.
+        row = LocationRow(resource_uuid=luuid, status="active", name="(placeholder)")
         session.add(row)
         session.flush()
     return int(row.id)

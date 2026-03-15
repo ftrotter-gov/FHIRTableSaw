@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
 from fhir_tablesaw_3tier.domain.common import CanonicalBase
+from fhir_tablesaw_3tier.domain.dropped_repeats import DroppedRepeatsReport
 
 
 class RoleTelecom(CanonicalBase):
@@ -67,18 +68,11 @@ class PractitionerRole(CanonicalBase):
     healthcare_service_resource_uuid: str | None = None
 
 
-class DroppedRepeatsReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    dropped_counts: dict[str, int] = Field(default_factory=dict)
-
-    def add(self, path: str, count: int) -> None:
-        self.dropped_counts[path] = self.dropped_counts.get(path, 0) + count
-
-    def to_text(self) -> str:
-        if not self.dropped_counts:
-            return "(none)"
-        lines = []
-        for k, v in sorted(self.dropped_counts.items(), key=lambda kv: (-kv[1], kv[0])):
-            lines.append(f"{k}: {v}")
-        return "\n".join(lines)
+__all__ = [
+    "RoleTelecom",
+    "RoleCode",
+    "Specialty",
+    "EndpointRef",
+    "PractitionerRole",
+    "DroppedRepeatsReport",
+]
