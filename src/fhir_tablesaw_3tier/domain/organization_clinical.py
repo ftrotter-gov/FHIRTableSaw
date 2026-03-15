@@ -40,12 +40,14 @@ class EndpointRef(CanonicalBase):
 class ClinicalOrganization(CanonicalBase):
     """Canonical ClinicalOrganization.
 
-    Canonical `id` is the FHIR resource id (UUID string).
+    `id` is the internal relational surrogate key (bigint).
+    `resource_uuid` is the FHIR resource id (UUID string).
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str
+    id: int | None = None
+    resource_uuid: str
     npi: str
 
     active: bool | None = None

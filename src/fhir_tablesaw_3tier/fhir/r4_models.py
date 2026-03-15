@@ -285,6 +285,63 @@ class PractitionerResource(Resource):
         ]
 
 
+# --- PractitionerRole (minimal) ---
+
+
+class PractitionerRoleResource(Resource):
+    __resource_type__ = "PractitionerRole"
+
+    active: BooleanType | None = Field(
+        None, alias="active", json_schema_extra={"element_property": True}
+    )
+
+    practitioner: Reference | None = Field(
+        None, alias="practitioner", json_schema_extra={"element_property": True}
+    )
+    organization: Reference | None = Field(
+        None, alias="organization", json_schema_extra={"element_property": True}
+    )
+
+    code: list[CodeableConcept] | None = Field(
+        None, alias="code", json_schema_extra={"element_property": True}
+    )
+    specialty: list[CodeableConcept] | None = Field(
+        None, alias="specialty", json_schema_extra={"element_property": True}
+    )
+
+    telecom: list[ContactPoint] | None = Field(
+        None, alias="telecom", json_schema_extra={"element_property": True}
+    )
+
+    endpoint: list[Reference] | None = Field(
+        None, alias="endpoint", json_schema_extra={"element_property": True}
+    )
+
+    location: list[Reference] | None = Field(
+        None, alias="location", json_schema_extra={"element_property": True}
+    )
+
+    healthcareService: list[Reference] | None = Field(
+        None, alias="healthcareService", json_schema_extra={"element_property": True}
+    )
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "extension",
+            "active",
+            "practitioner",
+            "organization",
+            "code",
+            "specialty",
+            "telecom",
+            "endpoint",
+            "location",
+            "healthcareService",
+        ]
+
+
 # --- Organization (minimal) ---
 
 
@@ -403,3 +460,48 @@ class OrganizationResource(Resource):
         mapping = super().get_alias_mapping()
         mapping["_alias"] = "alias__ext"
         return mapping
+
+
+# --- OrganizationAffiliation (minimal) ---
+
+
+class OrganizationAffiliationResource(Resource):
+    __resource_type__ = "OrganizationAffiliation"
+
+    active: BooleanType | None = Field(
+        None, alias="active", json_schema_extra={"element_property": True}
+    )
+
+    organization: Reference | None = Field(
+        None, alias="organization", json_schema_extra={"element_property": True}
+    )
+    participatingOrganization: Reference | None = Field(
+        None,
+        alias="participatingOrganization",
+        json_schema_extra={"element_property": True},
+    )
+
+    code: list[CodeableConcept] | None = Field(
+        None, alias="code", json_schema_extra={"element_property": True}
+    )
+    specialty: list[CodeableConcept] | None = Field(
+        None, alias="specialty", json_schema_extra={"element_property": True}
+    )
+    telecom: list[ContactPoint] | None = Field(
+        None, alias="telecom", json_schema_extra={"element_property": True}
+    )
+
+    # Explicitly exclude location/healthcareService for now (not modeled).
+
+    @classmethod
+    def elements_sequence(cls) -> list[str]:
+        return [
+            "id",
+            "extension",
+            "active",
+            "organization",
+            "participatingOrganization",
+            "code",
+            "specialty",
+            "telecom",
+        ]

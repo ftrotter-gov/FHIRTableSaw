@@ -58,9 +58,9 @@ def clinical_organization_from_fhir_json(
 
     if not org.id:
         _warn("Organization.id missing; using placeholder UUID all-zeros")
-        org_id = "00000000-0000-0000-0000-000000000000"
+        resource_uuid = "00000000-0000-0000-0000-000000000000"
     else:
-        org_id = str(org.id)
+        resource_uuid = str(org.id)
 
     # type must include prov
     has_prov = False
@@ -236,7 +236,7 @@ def clinical_organization_from_fhir_json(
             )
 
     canonical = ClinicalOrganization(
-        id=org_id,
+        resource_uuid=resource_uuid,
         npi=npi,
         active=bool(org.active) if org.active is not None else None,
         name=str(org.name) if org.name is not None else None,
@@ -370,7 +370,7 @@ def clinical_organization_to_fhir_json(org: ClinicalOrganization) -> dict[str, A
         )
 
     fhir = OrganizationResource(
-        id=org.id,
+        id=org.resource_uuid,
         meta=meta,
         active=org.active,
         type=[org_type],

@@ -24,6 +24,23 @@ NDH_LOGO_EXT_URL = "https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinitio
 ORG_ALIAS_TYPE_EXT_URL = "https://example.com/extension_url/org-alias-type"
 ORG_RATING_EXT_URL = "https://example.com/extension_url/rating"
 
+# --- PractitionerRole placeholders / extension URLs ---
+
+PRACTITIONER_ROLE_ACCEPTING_NEW_PATIENTS_EXT_URL = (
+    "https://example.com/extension_url/accepting_new_patients"
+)
+PRACTITIONER_ROLE_RATING_EXT_URL = "https://example.com/extension_url/practitioner_role_rating"
+
+PRACTITIONER_ROLE_CMS_PECOS_VALIDATED_EXT_URL = (
+    "https://example.com/extension_url/practitioner_role_cms_pecos_validated"
+)
+PRACTITIONER_ROLE_CMS_IAL2_VALIDATED_EXT_URL = (
+    "https://example.com/extension_url/practitioner_role_cms_ial2_validated"
+)
+PRACTITIONER_ROLE_HAS_CMS_ALIGNED_DATA_NETWORK_EXT_URL = (
+    "https://example.com/extension_url/practitioner_role_has_cms_aligned_data_network"
+)
+
 ORG_CMS_PECOS_VALIDATED_EXT_URL = "https://example.com/extension_url/cms_pecos_validated"
 ORG_CMS_IAL2_VALIDATED_EXT_URL = "https://example.com/extension_url/cms_ial2_validated"
 ORG_HAS_CMS_ALIGNED_DATA_NETWORK_EXT_URL = (

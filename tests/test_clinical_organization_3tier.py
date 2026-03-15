@@ -70,7 +70,7 @@ def test_parse_clinical_organization_and_drops() -> None:
     }
 
     org, report = clinical_organization_from_fhir_json(raw)
-    assert org.id == "22222222-2222-2222-2222-222222222222"
+    assert org.resource_uuid == "22222222-2222-2222-2222-222222222222"
     assert org.npi == "1234567890"
     assert org.aliases[0].alias_type == "doing-business-as"
     assert org.logo_url == "https://example.com/logo.png"

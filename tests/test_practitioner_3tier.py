@@ -37,7 +37,7 @@ def test_parse_practitioner_minimal_and_dropped_repeats() -> None:
     }
 
     practitioner, report = practitioner_from_fhir_json(raw)
-    assert practitioner.id == "11111111-1111-1111-1111-111111111111"
+    assert practitioner.resource_uuid == "11111111-1111-1111-1111-111111111111"
     assert practitioner.npi == "1234567890"
     assert practitioner.first_name == "Jane"
     assert practitioner.middle_name == "A."

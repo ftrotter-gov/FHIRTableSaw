@@ -262,7 +262,7 @@ def practitioner_from_fhir_json(
         pass
 
     practitioner = Practitioner(
-        id=resource_uuid,
+        resource_uuid=resource_uuid,
         npi=npi,
         active_status=active_status,
         first_name=legal.get("first"),
@@ -433,7 +433,7 @@ def practitioner_to_fhir_json(practitioner: Practitioner) -> dict[str, Any]:
         )
 
     fhir = PractitionerResource(
-        id=practitioner.id,
+        id=practitioner.resource_uuid,
         identifier=identifier,
         active=practitioner.active_status,
         name=names or None,

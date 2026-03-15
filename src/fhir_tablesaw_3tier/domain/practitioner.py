@@ -47,8 +47,17 @@ class VerificationResultRef(CanonicalBase):
 
 
 class Practitioner(CanonicalBase):
-    # Canonical id is the FHIR id (UUID as string)
-    id: str
+    """Canonical Practitioner.
+
+    `id` is the internal relational surrogate key (bigint).
+    `resource_uuid` is the FHIR resource id (UUID string).
+
+    Note: When parsing from FHIR, `id` will typically be None until the object
+    is persisted.
+    """
+
+    id: int | None = None
+    resource_uuid: str
     npi: str
     active_status: bool | None = None
 

@@ -1,0 +1,14 @@
+## OrganizationAffiliation
+
+In the three-tier architecture, **OrganizationAffiliation** is the bridge object between one **Organization** and another **Organization**. NDH describes it as structurally similar to PractitionerRole, except that instead of a practitioner providing services through an organization, a **participating organization** provides services to, participates in, or is affiliated with a **primary organization**. The profile includes `active`, `organization`, `participatingOrganization`, `code`, `specialty`, and `telecom`, and requires that at least one of `organization` or `participatingOrganization` exist. ([FHIR Build][2])
+
+For CMS implementation, **OrganizationAffiliation** should include a standard integer identifier in the database plus a UUID-backed FHIR resource `id`, along with a single active flag. It should contain a link to the **primary organization** and a link to the **participating organization**, where the participating organization is the entity fulfilling the role relative to the primary organization. This matches the NDH meaning of the resource. ([FHIR Build][2])
+
+For terminology, **OrganizationAffiliation.code** should contain **one and only one organizational affiliation role code** as a `CodeableConcept`. NDH allows `code` to repeat and binds it extensibly to **OrganizationAffiliation Roles**, but CMS can simplify this by permitting only one code per record. `specialty` should be a repeatable array, so any number of specialty concepts can be associated with the affiliation. ([FHIR Build][2])
+
+Telecom should be restricted to **phone and fax only**, excluding email, even though NDH allows general `ContactPoint` usage. In NDH, `telecom` is the affiliation-level contact information relevant to the participating organization in that relationship. CMS can keep this bridge object parallel to PractitionerRole by limiting telecom in the same way. ([FHIR Build][2])
+
+So the CMS OrganizationAffiliation profile-in-practice is: one primary organization, one participating organization, one affiliation role code, many specialties, phone/fax telecom only, one active flag, and standard internal plus UUID identifiers. That gives you a second bridge table that is intentionally very similar to PractitionerRole, but for organization-to-organization relationships instead of practitioner-to-organization relationships. ([FHIR Build][2])
+
+[1]: https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinition-ndh-PractitionerRole.html "NDH PractitionerRole - National Directory of Healthcare Providers & Services (NDH) Implementation Guide v2.0.0-current"
+[2]: https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinition-ndh-OrganizationAffiliation.html "NDH OrganizationAffiliation Profile - National Directory of Healthcare Providers & Services (NDH) Implementation Guide v2.0.0-current"
