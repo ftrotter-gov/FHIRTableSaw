@@ -13,8 +13,9 @@ from fhir_tablesaw_3tier.fhir.practitioner_role import (
     practitioner_role_from_fhir_json,
 )
 from fhir_tablesaw_3tier.db.reset import reset_db
-from fhir_tablesaw_3tier.env import load_dotenv
+from fhir_tablesaw_3tier.env import load_dotenv, require_env
 from fhir_tablesaw_3tier.ndh_slurp import slurp_to_postgres
+from fhir_tablesaw_3tier.db.engine import create_engine_with_schema
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -105,10 +106,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Drop all 3-tier tables and recreate them (WIPE DATA)",
     )
 
+    db_info = sub.add_parser(
+        "db-info",
+        help="Show effective DB connection + schema + table counts (reads .env)",
+    )
+
     args = parser.parse_args(argv)
 
     # Load .env once for all commands.
-    load_dotenv()
+    # Use override=True so .env is the source-of-truth even if you have shell
+    # env vars set from a previous run.
+    load_dotenv(override=True)
 
     if args.cmd == "parse-practitioner":
         raw = json.loads(open(args.input, "r", encoding="utf-8").read())
@@ -163,6 +171,39 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "reset-db":
         reset_db(db_url=None)
         print("Database reset complete (drop_all + create_all)")
+        return 0
+
+    if args.cmd == "db-info":
+        import os
+        from sqlalchemy import text
+
+        db_url = require_env("DATABASE_URL")
+        schema = os.environ.get("DB_SCHEMA") or "fhir_tablesaw"
+
+        engine = create_engine_with_schema(db_url=db_url, schema=schema)
+        with engine.connect() as conn:
+            search_path = conn.execute(text("show search_path")).scalar_one()
+            schema_exists = conn.execute(
+                text(
+                    "select schema_name from information_schema.schemata where schema_name=:s"
+                ),
+                {"s": schema},
+            ).scalar_one_or_none()
+            tables = conn.execute(
+                text(
+                    "select table_name from information_schema.tables where table_schema=:s order by table_name"
+                ),
+                {"s": schema},
+            ).scalars().all()
+
+        print(f"DATABASE_URL: {db_url}")
+        print(f"DB_SCHEMA: {schema}")
+        print(f"search_path: {search_path}")
+        print(f"schema exists: {bool(schema_exists)}")
+        print(f"tables in schema: {len(tables)}")
+        if tables:
+            for t in tables:
+                print(f"- {t}")
         return 0
 
     return 2

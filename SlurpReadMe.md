@@ -1,4 +1,3 @@
-# NDH Slurper (FHIRTableSaw 3-tier)
 
 This repo now includes a **simple ingestion (“slurp”) pipeline** that can pull data from an **unauthenticated NDH-style FHIR R4 server** and write it into a relational database using the 3-tier architecture.
 
@@ -104,6 +103,15 @@ Optional:
 ```bash
 fhir-tablesaw-3tier slurp-ndh --fhir-server-url "$FHIR_SERVER_URL"
 ```
+
+If you’re unsure where the data is going, run:
+
+```bash
+fhir-tablesaw-3tier db-info
+```
+
+That prints the effective `DATABASE_URL`, `DB_SCHEMA`, current `search_path`, and
+the tables it sees in that schema.
 
 `slurp-ndh` reads DB configuration from `.env`:
 

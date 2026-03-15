@@ -45,18 +45,34 @@ def create_engine_with_schema(*, db_url: str, schema: str | None) -> Engine:
 
     schema_name = _validate_schema(schema or "fhir_tablesaw")
 
-    # Ensure schema exists.
+    # Ensure schema exists using a one-off connection.
+    # Important: we dispose the pool after this so subsequent connections
+    # will be created with the correct search_path.
     with engine.connect() as conn:
         conn = conn.execution_options(isolation_level="AUTOCOMMIT")
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema_name}"'))
 
-    # Ensure every new connection uses this schema.
-    @event.listens_for(engine, "connect")
-    def _set_search_path(dbapi_connection, _connection_record) -> None:  # type: ignore[no-redef]
+    # Clear any pooled connections created before we set our search_path hook.
+    engine.dispose()
+
+    def _apply_search_path(dbapi_connection) -> None:
         cursor = dbapi_connection.cursor()
         try:
+            # Use schema-only search_path so DDL + existence checks never get
+            # confused by similarly-named tables in other schemas (e.g. public).
             cursor.execute(f'SET search_path TO "{schema_name}"')
         finally:
             cursor.close()
+
+    # Ensure every new DBAPI connection uses this schema.
+    @event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection, _connection_record) -> None:  # type: ignore[no-redef]
+        _apply_search_path(dbapi_connection)
+
+    # Also re-apply on checkout (defensive: protects against a connection
+    # whose search_path was changed during a previous use).
+    @event.listens_for(engine, "checkout")
+    def _on_checkout(dbapi_connection, _connection_record, _connection_proxy) -> None:  # type: ignore[no-redef]
+        _apply_search_path(dbapi_connection)
 
     return engine

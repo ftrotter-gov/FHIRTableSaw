@@ -15,7 +15,16 @@ from fhir_tablesaw_3tier.db.models import TelecomRow
 
 
 def ensure_uuid(value: str | uuid.UUID) -> uuid.UUID:
-    return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+    if isinstance(value, uuid.UUID):
+        return value
+    s = str(value)
+    try:
+        return uuid.UUID(s)
+    except ValueError:
+        # Some real-world/test FHIR servers use non-UUID logical ids (e.g., "HansSolo").
+        # We still need a stable UUID for relational storage, so we derive a
+        # deterministic UUID5.
+        return uuid.uuid5(uuid.NAMESPACE_URL, s)
 
 
 def get_or_create_telecom_id(session: Session, *, type: str, value: str) -> int:

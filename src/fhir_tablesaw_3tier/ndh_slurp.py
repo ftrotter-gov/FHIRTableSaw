@@ -29,6 +29,45 @@ from fhir_tablesaw_3tier.env import load_dotenv, require_env
 from fhir_tablesaw_3tier.db.engine import create_engine_with_schema
 
 
+def _now() -> float:
+    import time
+
+    return time.time()
+
+
+def _progress_line(label: str, *, processed: int, saved: int, failed: int, started_at: float) -> str:
+    elapsed = max(_now() - started_at, 0.000001)
+    rate = saved / elapsed
+    return (
+        f"{label}: processed={processed} saved={saved} failed={failed} "
+        f"elapsed={elapsed:0.1f}s rate={rate:0.1f}/s"
+    )
+
+
+def _safe_parse(
+    parse_fn,
+    raw: dict[str, Any],
+    *,
+    dropped_counter: Counter[str],
+    failures_counter: Counter[str],
+    label: str,
+    fhir_server_url: str,
+):
+    """Parse a FHIR resource into canonical, capturing dropped-repeat counts.
+
+    Returns canonical object or None if parsing fails.
+    """
+
+    try:
+        obj, report = parse_fn(raw, fhir_server_url=fhir_server_url)
+        dropped_counter.update(report.dropped_counts)
+        return obj
+    except Exception as ex:  # noqa: BLE001
+        failures_counter[label] += 1
+        print(f"WARNING: parse failed for {label}: {ex}")
+        return None
+
+
 def _iter_bundle_entries(bundle: dict[str, Any]) -> Iterable[dict[str, Any]]:
     for entry in bundle.get("entry", []) or []:
         res = entry.get("resource")
@@ -100,6 +139,8 @@ def slurp_to_postgres(
     - OrganizationAffiliation
     """
 
+    overall_started_at = _now()
+
     load_dotenv()
     if db_url is None:
         db_url = require_env("DATABASE_URL")
@@ -110,70 +151,136 @@ def slurp_to_postgres(
         Base.metadata.create_all(engine)
 
     dropped: Counter[str] = Counter()
+    failures: Counter[str] = Counter()
+
+    # progress counters
+    processed: Counter[str] = Counter()
+    saved: Counter[str] = Counter()
+    started_at: dict[str, float] = {}
+
+    def _tick(label: str, *, did_save: bool) -> None:
+        if label not in started_at:
+            started_at[label] = _now()
+        if did_save:
+            saved[label] += 1
+        # Print every 10 processed (default chatty)
+        if processed[label] % 10 == 0:
+            print(
+                _progress_line(
+                    label,
+                    processed=processed[label],
+                    saved=saved[label],
+                    failed=failures[label],
+                    started_at=started_at[label],
+                )
+            )
 
     with httpx.Client(base_url=fhir_server_url.rstrip("/") + "/", timeout=30.0) as client:
         with Session(engine) as session:
+            print(f"Starting slurp from {fhir_server_url} into schema {schema}")
+
             # Practitioners
+            print("--- Practitioners ---")
             for raw in fetch_bundles(
                 client=client,
                 resource_type="Practitioner",
                 count=count,
                 hard_limit=hard_limit,
             ):
-                p, report = practitioner_from_fhir_json(raw, fhir_server_url=fhir_server_url)
-                dropped.update(report.dropped_counts)
-                save_practitioner(session, p)
+                processed["Practitioner"] += 1
+                p = _safe_parse(
+                    practitioner_from_fhir_json,
+                    raw,
+                    dropped_counter=dropped,
+                    failures_counter=failures,
+                    label="Practitioner",
+                    fhir_server_url=fhir_server_url,
+                )
+                if p is not None:
+                    save_practitioner(session, p)
+                    _tick("Practitioner", did_save=True)
+                else:
+                    _tick("Practitioner", did_save=False)
 
             session.commit()
 
             # Organizations -> ClinicalOrganization only (prov)
+            print("--- Organizations (ClinicalOrganization) ---")
             for raw in fetch_bundles(
                 client=client,
                 resource_type="Organization",
                 count=count,
                 hard_limit=hard_limit,
             ):
-                try:
-                    org, report = clinical_organization_from_fhir_json(
-                        raw, fhir_server_url=fhir_server_url
-                    )
-                except Exception:
-                    # Non-clinical org types will likely fail NPI constraint; skip for now.
-                    continue
-                dropped.update(report.dropped_counts)
-                save_clinical_organization(session, org)
+                processed["ClinicalOrganization"] += 1
+                org = _safe_parse(
+                    clinical_organization_from_fhir_json,
+                    raw,
+                    dropped_counter=dropped,
+                    failures_counter=failures,
+                    label="ClinicalOrganization",
+                    fhir_server_url=fhir_server_url,
+                )
+                if org is not None:
+                    save_clinical_organization(session, org)
+                    _tick("ClinicalOrganization", did_save=True)
+                else:
+                    _tick("ClinicalOrganization", did_save=False)
 
             session.commit()
 
             # PractitionerRole
+            print("--- PractitionerRoles ---")
             for raw in fetch_bundles(
                 client=client,
                 resource_type="PractitionerRole",
                 count=count,
                 hard_limit=hard_limit,
             ):
-                role, report = practitioner_role_from_fhir_json(raw, fhir_server_url=fhir_server_url)
-                dropped.update(report.dropped_counts)
-                try:
-                    save_practitioner_role(session, role)
-                except ValueError:
-                    # missing practitioner/org in DB slice
-                    continue
+                processed["PractitionerRole"] += 1
+                role = _safe_parse(
+                    practitioner_role_from_fhir_json,
+                    raw,
+                    dropped_counter=dropped,
+                    failures_counter=failures,
+                    label="PractitionerRole",
+                    fhir_server_url=fhir_server_url,
+                )
+                if role is not None:
+                    try:
+                        save_practitioner_role(session, role)
+                        _tick("PractitionerRole", did_save=True)
+                    except ValueError:
+                        # missing practitioner/org in DB slice
+                        failures["PractitionerRole.missing_refs"] += 1
+                        _tick("PractitionerRole", did_save=False)
+                else:
+                    _tick("PractitionerRole", did_save=False)
 
             session.commit()
 
             # OrganizationAffiliation
+            print("--- OrganizationAffiliations ---")
             for raw in fetch_bundles(
                 client=client,
                 resource_type="OrganizationAffiliation",
                 count=count,
                 hard_limit=hard_limit,
             ):
-                aff, report = organization_affiliation_from_fhir_json(
-                    raw, fhir_server_url=fhir_server_url
+                processed["OrganizationAffiliation"] += 1
+                aff = _safe_parse(
+                    organization_affiliation_from_fhir_json,
+                    raw,
+                    dropped_counter=dropped,
+                    failures_counter=failures,
+                    label="OrganizationAffiliation",
+                    fhir_server_url=fhir_server_url,
                 )
-                dropped.update(report.dropped_counts)
-                save_organization_affiliation(session, aff)
+                if aff is not None:
+                    save_organization_affiliation(session, aff)
+                    _tick("OrganizationAffiliation", did_save=True)
+                else:
+                    _tick("OrganizationAffiliation", did_save=False)
 
             session.commit()
 
@@ -181,6 +288,20 @@ def slurp_to_postgres(
     print("\n--- dropped-repeats summary (all ingested resources) ---")
     if not dropped:
         print("(none)")
-        return
-    for path, cnt in sorted(dropped.items(), key=lambda kv: (-kv[1], kv[0])):
-        print(f"{path}: {cnt}")
+    else:
+        for path, cnt in sorted(dropped.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"{path}: {cnt}")
+
+    print("\n--- parse/persist failures summary ---")
+    if not failures:
+        print("(none)")
+    else:
+        for k, v in sorted(failures.items(), key=lambda kv: (-kv[1], kv[0])):
+            print(f"{k}: {v}")
+
+    print("\n--- saved counts ---")
+    for k in sorted(saved.keys()):
+        print(f"{k}: {saved[k]}")
+
+    overall_elapsed = _now() - overall_started_at
+    print(f"\nTotal runtime: {overall_elapsed:0.1f}s")

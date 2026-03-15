@@ -14,12 +14,17 @@ from __future__ import annotations
 from typing import Literal
 
 from fhir_core.fhirabstractmodel import FHIRAbstractModel
-from fhir_core.types import BooleanType, CodeType, IdType, IntegerType, StringType, UrlType
-from pydantic import Field
+from fhir_core.types import BooleanType, CodeType, IdType, IntegerType, StringType
+from pydantic import ConfigDict, Field
 
 
 class Element(FHIRAbstractModel):
     __resource_type__ = "Element"
+
+    # Real-world NDH servers include many fields we don't model.
+    # For the 3-tier pipeline, we intentionally parse only a small subset,
+    # so we ignore unknown fields instead of failing validation.
+    model_config = ConfigDict(extra="ignore")
 
     id: IdType | None = Field(None, alias="id", json_schema_extra={"element_property": True})
     extension: list["Extension"] | None = Field(
@@ -44,7 +49,10 @@ class Resource(Element):
 class Coding(Element):
     __resource_type__ = "Coding"
 
-    system: UrlType | None = Field(
+    # Use StringType rather than UrlType because real-world servers sometimes
+    # include non-URL system values (e.g., urn:oid) and we don't want strict URL
+    # validation to break ingestion.
+    system: StringType | None = Field(
         None, alias="system", json_schema_extra={"element_property": True}
     )
     code: CodeType | None = Field(
@@ -92,7 +100,7 @@ class Reference(Element):
 class Extension(Element):
     __resource_type__ = "Extension"
 
-    url: UrlType = Field(..., alias="url", json_schema_extra={"element_property": True})
+    url: StringType = Field(..., alias="url", json_schema_extra={"element_property": True})
 
     # Support only what we need right now.
     valueBoolean: BooleanType | None = Field(
@@ -107,7 +115,7 @@ class Extension(Element):
     valueString: StringType | None = Field(
         None, alias="valueString", json_schema_extra={"element_property": True}
     )
-    valueUrl: UrlType | None = Field(
+    valueUrl: StringType | None = Field(
         None, alias="valueUrl", json_schema_extra={"element_property": True}
     )
     valueCoding: Coding | None = Field(
@@ -136,7 +144,7 @@ class Extension(Element):
 class Identifier(Element):
     __resource_type__ = "Identifier"
 
-    system: UrlType | None = Field(
+    system: StringType | None = Field(
         None, alias="system", json_schema_extra={"element_property": True}
     )
     value: StringType | None = Field(
@@ -348,7 +356,7 @@ class PractitionerRoleResource(Resource):
 class Meta(Element):
     __resource_type__ = "Meta"
 
-    profile: list[UrlType] | None = Field(
+    profile: list[StringType] | None = Field(
         None, alias="profile", json_schema_extra={"element_property": True}
     )
 
