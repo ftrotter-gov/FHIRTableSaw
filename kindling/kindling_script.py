@@ -1,4 +1,47 @@
 #!/usr/bin/env python3
+"""
+Kindling Script - Standalone FHIR Resource Exporter
+
+PURPOSE:
+    This is a lightweight, standalone utility for quickly exporting FHIR resources
+    from any FHIR R4 server endpoint to CSV format. It is called "kindling" because
+    it helps you gather raw material (data) to start your analysis fire.
+
+INDEPENDENCE:
+    This script is completely independent of both the old fhir_tablesaw and the new
+    fhir_tablesaw_3tier implementations. It has no dependencies on the main codebase
+    and can be used as a general-purpose FHIR export tool.
+
+WHAT IT DOES:
+    1. Connects to a FHIR server endpoint (no authentication required)
+    2. Fetches resources following pagination links automatically
+    3. Flattens nested JSON structures into dotted column names
+    4. Converts remaining complex structures (arrays, objects) to JSON strings
+    5. Exports everything to a single CSV file
+
+USAGE:
+    Basic usage:
+        python kindling_script.py https://fhir.example.org/Practitioner output.csv
+
+    With custom limit:
+        python kindling_script.py https://fhir.example.org/Practitioner output.csv --limit 5000
+
+DEPENDENCIES:
+    - pandas: For DataFrame operations and CSV export
+    - requests: For HTTP requests to FHIR servers
+
+LIMITATIONS:
+    - Maximum 1000 resources by default (configurable via --limit)
+    - No authentication support (public FHIR endpoints only)
+    - Lossy flattening (complex nested structures become JSON strings)
+    - Not suitable for production ETL (use fhir_tablesaw_3tier for that)
+
+USE CASES:
+    - Quick data exploration
+    - Creating sample datasets for testing
+    - Ad-hoc data extraction from public FHIR servers
+    - Prototyping analysis workflows
+"""
 
 import argparse
 import json

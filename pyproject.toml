@@ -27,7 +27,6 @@ dev = [
 ]
 
 [project.scripts]
-fhir-tablesaw = "fhir_tablesaw.cli:main"
 fhir-tablesaw-3tier = "fhir_tablesaw_3tier.cli:main"
 
 [tool.setuptools]
