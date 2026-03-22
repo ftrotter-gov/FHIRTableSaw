@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+Example script to load Practitioner NDJSON data using fhir4ds.
+
+This demonstrates the new SQL on FHIR approach using ViewDefinitions.
+
+Usage:
+    python scripts/load_practitioner_ndjson.py <path_to_ndjson_file>
+
+Example:
+    python scripts/load_practitioner_ndjson.py data/practitioners.ndjson
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Add src to path for development
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from fhir_tablesaw_3tier.env import load_dotenv
+from fhir_tablesaw_3tier.fhir4ds_integration import process_practitioner_ndjson
+
+
+def main() -> None:
+    """Main entry point."""
+    # Load environment variables
+    load_dotenv()
+
+    if len(sys.argv) < 2:
+        print("ERROR: Missing NDJSON file path")
+        print()
+        print("Usage:")
+        print(f"  python {sys.argv[0]} <path_to_ndjson_file>")
+        print()
+        print("Example:")
+        print(f"  python {sys.argv[0]} data/practitioners.ndjson")
+        sys.exit(1)
+
+    ndjson_path = sys.argv[1]
+
+    print(f"Loading Practitioner data from: {ndjson_path}")
+    print()
+
+    try:
+        result = process_practitioner_ndjson(
+            ndjson_path=ndjson_path,
+            if_exists="append",  # Change to 'replace' to drop/recreate table
+        )
+
+        print("=" * 60)
+        print("PROCESSING COMPLETE")
+        print("=" * 60)
+        print(f"Status: {result['status']}")
+        print(f"Total resources in file: {result.get('total_resources', 'N/A')}")
+        print(f"Matching Practitioners: {result.get('matching_resources', 'N/A')}")
+        print(f"Resource type: {result.get('resource_type', 'N/A')}")
+        print(f"Table name: {result.get('table_name', 'N/A')}")
+        print(f"Mode: {result.get('if_exists', 'N/A')}")
+        print("=" * 60)
+
+        if result["status"] == "success":
+            print()
+            print("✓ Data successfully loaded to PostgreSQL!")
+        elif result["status"] == "no_data":
+            print()
+            print("⚠ No data found in NDJSON file")
+        elif result["status"] == "no_matching_resources":
+            print()
+            print(f"⚠ No {result['expected_type']} resources found in file")
+            print(f"  File contains {result['total_resources']} resources of other types")
+
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+    except ImportError as e:
+        print(f"ERROR: {e}")
+        print()
+        print("Make sure fhir4ds is installed:")
+        print("  pip install fhir4ds")
+        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Unexpected error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

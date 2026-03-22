@@ -1,0 +1,111 @@
+{
+  "resourceType": "ViewDefinition",
+  "url": "http://example.org/fhir/ViewDefinition/practitioner",
+  "name": "practitioner",
+  "title": "Practitioner View for NDH",
+  "status": "draft",
+  "description": "Flattened view of FHIR Practitioner resources for National Directory of Healthcare Providers",
+  "resource": "Practitioner",
+  "fhirVersion": ["4.0.1"],
+  "select": [
+    {
+      "column": [
+        {
+          "name": "resource_uuid",
+          "path": "id",
+          "description": "FHIR resource ID"
+        },
+        {
+          "name": "npi",
+          "path": "identifier.where(system='http://hl7.org/fhir/sid/us-npi').value.first()",
+          "description": "National Provider Identifier"
+        },
+        {
+          "name": "active_status",
+          "path": "active",
+          "description": "Whether practitioner is actively practicing"
+        },
+        {
+          "name": "first_name",
+          "path": "name[0].given[0]",
+          "description": "Legal first name"
+        },
+        {
+          "name": "middle_name",
+          "path": "name[0].given[1]",
+          "description": "Legal middle name"
+        },
+        {
+          "name": "last_name",
+          "path": "name[0].family",
+          "description": "Legal last name"
+        },
+        {
+          "name": "prefix",
+          "path": "name[0].prefix[0]",
+          "description": "Name prefix (e.g., Dr., Mr.)"
+        },
+        {
+          "name": "non_clinical_suffix",
+          "path": "name[0].suffix[0]",
+          "description": "Name suffix (e.g., Jr., III)"
+        },
+        {
+          "name": "other_first_name",
+          "path": "name[1].given[0]",
+          "description": "Alternate first name"
+        },
+        {
+          "name": "other_middle_name",
+          "path": "name[1].given[1]",
+          "description": "Alternate middle name"
+        },
+        {
+          "name": "other_last_name",
+          "path": "name[1].family",
+          "description": "Alternate last name"
+        },
+        {
+          "name": "other_prefix",
+          "path": "name[1].prefix[0]",
+          "description": "Alternate name prefix"
+        },
+        {
+          "name": "other_non_clinical_suffix",
+          "path": "name[1].suffix[0]",
+          "description": "Alternate name suffix"
+        },
+        {
+          "name": "gender",
+          "path": "gender",
+          "description": "Gender identity"
+        },
+        {
+          "name": "race_code",
+          "path": "extension.where(url='http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension.where(url='ombCategory').valueCoding.code.first()",
+          "description": "Race code from US Core extension"
+        },
+        {
+          "name": "ethnicity_code",
+          "path": "extension.where(url='http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity').extension.where(url='ombCategory').valueCoding.code.first()",
+          "description": "Ethnicity code from US Core extension"
+        },
+        {
+          "name": "is_cms_enrolled",
+          "path": "extension.where(url='https://example.com/extension_url/cms-enrolled').valueBoolean",
+          "description": "CMS enrollment status"
+        },
+        {
+          "name": "is_cms_ial2_verified",
+          "path": "extension.where(url='https://example.com/extension_url/cms-ial2-verified').valueBoolean",
+          "description": "CMS IAL2 verification status"
+        },
+        {
+          "name": "is_participating_in_cms_aligned_data_networks",
+          "path": "extension.where(url='https://example.com/extension_url/cms-aligned-data-networks').valueBoolean",
+          "description": "CMS aligned data networks participation"
+        }
+      ]
+    }
+  ]
+}
