@@ -1,5 +1,3 @@
-
-
 # FIRE Resource Description: Endpoint
 
 The definition for this lives here: https://build.fhir.org/ig/HL7/fhir-us-ndh/StructureDefinition-ndh-Endpoint.html
