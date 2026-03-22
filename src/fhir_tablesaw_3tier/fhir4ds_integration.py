@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fhir_tablesaw_3tier.env import get_db_url
+from fhir_tablesaw_3tier.env import get_db_schema, get_db_url
 
 
 class ViewDefinitionLoader:
@@ -125,10 +125,13 @@ class FHIR4DSRunner:
         """
         # Import fhir4ds here so it's only required when actually using this functionality
         try:
-            from fhir4ds import FHIRPath
+            import pandas as pd
+            from fhir4ds import FHIRDataStore, PostgreSQLDialect
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.engine.url import make_url
         except ImportError as e:
             raise ImportError(
-                "fhir4ds is not installed. Install it with: pip install fhir4ds"
+                "fhir4ds is not installed. Install it with: pip install fhir4ds pandas sqlalchemy"
             ) from e
 
         # Load FHIR resources from NDJSON
@@ -153,14 +156,117 @@ class FHIR4DSRunner:
                 "message": f"No {self.resource_type} resources found in file",
             }
 
-        # Use fhir4ds to process and load
-        fhir = FHIRPath(view_definition=self.viewdef)
-        fhir.load(matching_resources)
-
-        # Load to PostgreSQL
-        fhir.to_postgres(
-            connection_string=self.db_url, table_name=self.table_name, if_exists=if_exists
+        # Convert SQLAlchemy URL to psycopg2 connection string format
+        url = make_url(self.db_url)
+        psycopg2_conn_str = (
+            f"host={url.host} "
+            f"port={url.port or 5432} "
+            f"user={url.username} "
+            f"password={url.password} "
+            f"dbname={url.database}"
         )
+
+        # Create FHIRDataStore with PostgreSQL dialect
+        dialect = PostgreSQLDialect(conn_str=psycopg2_conn_str)
+        datastore = FHIRDataStore(dialect=dialect, initialize_table=True)
+
+        # Load resources into the datastore
+        datastore.load_resources(matching_resources)
+
+        # Get the ViewRunner and execute the view definition
+        view_runner = datastore.view_runner()
+        result = view_runner.execute_view_definition(self.viewdef)
+
+        # Convert QueryResult to DataFrame
+        result_df = result.to_dataframe()
+
+        # Get schema from environment variable (defaults to "public")
+        schema_name = get_db_schema()
+
+        # Load the resulting dataframe to PostgreSQL with upsert on resource_uuid
+        engine = create_engine(self.db_url)
+
+        # Create table if it doesn't exist
+        result_df.head(0).to_sql(
+            name=self.table_name, con=engine, schema=schema_name, if_exists="append", index=False
+        )
+
+        # Ensure unique constraint exists on resource_uuid
+        with engine.connect() as conn:
+            # Check if constraint exists
+            constraint_exists_query = text(f'''
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = '{self.table_name}_resource_uuid_key'
+                    AND conrelid = '"{schema_name}"."{self.table_name}"'::regclass
+                )
+            ''')
+            constraint_exists = conn.execute(constraint_exists_query).scalar()
+
+            if not constraint_exists:
+                # Remove duplicates before adding constraint (keep first occurrence)
+                dedup_query = text(f'''
+                    DELETE FROM "{schema_name}"."{self.table_name}" a USING (
+                        SELECT MIN(ctid) as ctid, resource_uuid
+                        FROM "{schema_name}"."{self.table_name}"
+                        GROUP BY resource_uuid HAVING COUNT(*) > 1
+                    ) b
+                    WHERE a.resource_uuid = b.resource_uuid
+                    AND a.ctid <> b.ctid
+                ''')
+                conn.execute(dedup_query)
+
+                # Now add the unique constraint
+                add_constraint_query = text(f'''
+                    ALTER TABLE "{schema_name}"."{self.table_name}"
+                    ADD CONSTRAINT {self.table_name}_resource_uuid_key UNIQUE (resource_uuid)
+                ''')
+                conn.execute(add_constraint_query)
+
+            conn.commit()
+
+        # Perform upsert using PostgreSQL's ON CONFLICT
+        with engine.connect() as conn:
+            # Get column names from the dataframe
+            columns = list(result_df.columns)
+            columns_str = ", ".join([f'"{col}"' for col in columns])
+            placeholders = ", ".join([f":{col}" for col in columns])
+
+            # Build update clause for all columns except resource_uuid
+            update_cols = [col for col in columns if col != "resource_uuid"]
+            update_str = ", ".join([f'"{col}" = EXCLUDED."{col}"' for col in update_cols])
+
+            # Build upsert query
+            upsert_query = text(f'''
+                INSERT INTO "{schema_name}"."{self.table_name}" ({columns_str})
+                VALUES ({placeholders})
+                ON CONFLICT (resource_uuid) DO UPDATE SET {update_str}
+            ''')
+
+            # Execute upsert for each row
+            for _, row in result_df.iterrows():
+                conn.execute(upsert_query, row.to_dict())
+
+            conn.commit()
+
+        # Verify the write by reading back the count
+        try:
+            verify_query = f'SELECT COUNT(*) as count FROM "{schema_name}"."{self.table_name}"'
+            with engine.connect() as conn:
+                verify_result = conn.execute(text(verify_query))
+                row_count = verify_result.fetchone()[0]
+        except Exception as e:
+            engine.dispose()
+            raise RuntimeError(
+                f"Failed to verify data write to {schema_name}.{self.table_name}: {e}"
+            ) from e
+        finally:
+            engine.dispose()
+
+        # Extract database information for full path
+        url_obj = make_url(self.db_url)
+        database_name = url_obj.database or "postgres"
+        full_table_path = f"{database_name}.{schema_name}.{self.table_name}"
 
         return {
             "status": "success",
@@ -168,6 +274,8 @@ class FHIR4DSRunner:
             "matching_resources": len(matching_resources),
             "resource_type": self.resource_type,
             "table_name": self.table_name,
+            "full_table_path": full_table_path,
+            "rows_in_table": row_count,
             "if_exists": if_exists,
         }
 

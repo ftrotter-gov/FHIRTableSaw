@@ -56,3 +56,12 @@ def get_db_url() -> str:
         ValueError: If DATABASE_URL is not set
     """
     return require_env("DATABASE_URL")
+
+
+def get_db_schema() -> str:
+    """Get the DB_SCHEMA from environment.
+
+    Returns:
+        Schema name (defaults to 'public' if not set)
+    """
+    return os.environ.get("DB_SCHEMA", "public")

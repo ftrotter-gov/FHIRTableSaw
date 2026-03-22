@@ -81,16 +81,6 @@
           "description": "Gender identity"
         },
         {
-          "name": "race_code",
-          "path": "extension.where(url='http://hl7.org/fhir/us/core/StructureDefinition/us-core-race').extension.where(url='ombCategory').valueCoding.code.first()",
-          "description": "Race code from US Core extension"
-        },
-        {
-          "name": "ethnicity_code",
-          "path": "extension.where(url='http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity').extension.where(url='ombCategory').valueCoding.code.first()",
-          "description": "Ethnicity code from US Core extension"
-        },
-        {
           "name": "is_cms_enrolled",
           "path": "extension.where(url='https://example.com/extension_url/cms-enrolled').valueBoolean",
           "description": "CMS enrollment status"

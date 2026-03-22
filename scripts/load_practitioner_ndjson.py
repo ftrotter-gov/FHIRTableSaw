@@ -56,13 +56,15 @@ def main() -> None:
         print(f"Total resources in file: {result.get('total_resources', 'N/A')}")
         print(f"Matching Practitioners: {result.get('matching_resources', 'N/A')}")
         print(f"Resource type: {result.get('resource_type', 'N/A')}")
-        print(f"Table name: {result.get('table_name', 'N/A')}")
+        print(f"Saved to: {result.get('full_table_path', 'N/A')}")
+        print(f"Rows in table (verified): {result.get('rows_in_table', 'N/A')}")
         print(f"Mode: {result.get('if_exists', 'N/A')}")
         print("=" * 60)
 
         if result["status"] == "success":
             print()
             print("✓ Data successfully loaded to PostgreSQL!")
+            print(f"✓ Verified: {result.get('rows_in_table', 0)} rows in table")
         elif result["status"] == "no_data":
             print()
             print("⚠ No data found in NDJSON file")
