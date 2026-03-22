@@ -300,3 +300,108 @@ def process_practitioner_ndjson(
 
     runner = FHIR4DSRunner(viewdef_path=viewdef_path)
     return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
+
+
+def process_endpoint_ndjson(
+    *, ndjson_path: Path | str, viewdef_path: Path | str | None = None, if_exists: str = "append"
+) -> dict[str, Any]:
+    """Convenience function to process Endpoint NDJSON files.
+
+    Args:
+        ndjson_path: Path to Endpoint NDJSON file
+        viewdef_path: Path to ViewDefinition (default: viewdefs/endpoint.json)
+        if_exists: How to handle existing table ('append', 'replace', 'fail')
+
+    Returns:
+        Summary dictionary with processing stats
+    """
+    if viewdef_path is None:
+        project_root = Path(__file__).parent.parent.parent
+        viewdef_path = project_root / "viewdefs" / "endpoint.json"
+
+    runner = FHIR4DSRunner(viewdef_path=viewdef_path)
+    return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
+
+
+def process_location_ndjson(
+    *, ndjson_path: Path | str, viewdef_path: Path | str | None = None, if_exists: str = "append"
+) -> dict[str, Any]:
+    """Convenience function to process Location NDJSON files.
+
+    Args:
+        ndjson_path: Path to Location NDJSON file
+        viewdef_path: Path to ViewDefinition (default: viewdefs/location.json)
+        if_exists: How to handle existing table ('append', 'replace', 'fail')
+
+    Returns:
+        Summary dictionary with processing stats
+    """
+    if viewdef_path is None:
+        project_root = Path(__file__).parent.parent.parent
+        viewdef_path = project_root / "viewdefs" / "location.json"
+
+    runner = FHIR4DSRunner(viewdef_path=viewdef_path)
+    return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
+
+
+def process_organization_ndjson(
+    *, ndjson_path: Path | str, viewdef_path: Path | str | None = None, if_exists: str = "append"
+) -> dict[str, Any]:
+    """Convenience function to process Organization NDJSON files.
+
+    Args:
+        ndjson_path: Path to Organization NDJSON file
+        viewdef_path: Path to ViewDefinition (default: viewdefs/organization.json)
+        if_exists: How to handle existing table ('append', 'replace', 'fail')
+
+    Returns:
+        Summary dictionary with processing stats
+    """
+    if viewdef_path is None:
+        project_root = Path(__file__).parent.parent.parent
+        viewdef_path = project_root / "viewdefs" / "organization.json"
+
+    runner = FHIR4DSRunner(viewdef_path=viewdef_path)
+    return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
+
+
+def process_organization_affiliation_ndjson(
+    *, ndjson_path: Path | str, viewdef_path: Path | str | None = None, if_exists: str = "append"
+) -> dict[str, Any]:
+    """Convenience function to process OrganizationAffiliation NDJSON files.
+
+    Args:
+        ndjson_path: Path to OrganizationAffiliation NDJSON file
+        viewdef_path: Path to ViewDefinition (default: viewdefs/organization_affiliation.json)
+        if_exists: How to handle existing table ('append', 'replace', 'fail')
+
+    Returns:
+        Summary dictionary with processing stats
+    """
+    if viewdef_path is None:
+        project_root = Path(__file__).parent.parent.parent
+        viewdef_path = project_root / "viewdefs" / "organization_affiliation.json"
+
+    runner = FHIR4DSRunner(viewdef_path=viewdef_path)
+    return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
+
+
+def process_practitioner_role_ndjson(
+    *, ndjson_path: Path | str, viewdef_path: Path | str | None = None, if_exists: str = "append"
+) -> dict[str, Any]:
+    """Convenience function to process PractitionerRole NDJSON files.
+
+    Args:
+        ndjson_path: Path to PractitionerRole NDJSON file
+        viewdef_path: Path to ViewDefinition (default: viewdefs/practitioner_role.json)
+        if_exists: How to handle existing table ('append', 'replace', 'fail')
+
+    Returns:
+        Summary dictionary with processing stats
+    """
+    if viewdef_path is None:
+        project_root = Path(__file__).parent.parent.parent
+        viewdef_path = project_root / "viewdefs" / "practitioner_role.json"
+
+    runner = FHIR4DSRunner(viewdef_path=viewdef_path)
+    return runner.process_ndjson(ndjson_path=ndjson_path, if_exists=if_exists)
