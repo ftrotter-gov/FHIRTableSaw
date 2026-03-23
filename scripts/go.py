@@ -93,13 +93,16 @@ def find_ndjson_files(*, directory: Path, test_mode: bool) -> list[Path]:
     return sorted(files)
 
 
-def process_file(*, file_path: Path, resource_type: str, if_exists: str = "append") -> dict:
+def process_file(
+    *, file_path: Path, resource_type: str, if_exists: str = "append", batch_size: int = 5000
+) -> dict:
     """Process a single NDJSON file.
 
     Args:
         file_path: Path to NDJSON file
         resource_type: Detected resource type
         if_exists: How to handle existing table
+        batch_size: Number of resources to process per batch
 
     Returns:
         Result dictionary from processing function
@@ -109,9 +112,10 @@ def process_file(*, file_path: Path, resource_type: str, if_exists: str = "appen
     print(f"\n{'=' * 70}")
     print(f"Processing: {file_path.name}")
     print(f"Resource Type: {resource_type.title()}")
+    print(f"Batch Size: {batch_size} resources per batch")
     print(f"{'=' * 70}")
 
-    result = processor(ndjson_path=str(file_path), if_exists=if_exists)
+    result = processor(ndjson_path=str(file_path), if_exists=if_exists, batch_size=batch_size)
     return result
 
 
@@ -139,6 +143,12 @@ Examples:
         "--replace",
         action="store_true",
         help="Replace existing tables instead of appending",
+    )
+    parser.add_argument(
+        "--batchsize",
+        type=int,
+        default=5000,
+        help="Number of resources to process per batch (default: 5000)",
     )
 
     args = parser.parse_args()
@@ -199,12 +209,18 @@ Examples:
     for file_path, resource_type in processable_files:
         try:
             result = process_file(
-                file_path=file_path, resource_type=resource_type, if_exists=if_exists
+                file_path=file_path,
+                resource_type=resource_type,
+                if_exists=if_exists,
+                batch_size=args.batchsize,
             )
             results.append((file_path.name, resource_type, result))
 
             if result["status"] == "success":
-                print(f"✓ SUCCESS: {result.get('matching_resources', 0)} resources loaded")
+                batches = result.get("batches_processed", "N/A")
+                print(
+                    f"✓ SUCCESS: {result.get('matching_resources', 0)} resources loaded in {batches} batches"
+                )
             else:
                 print(f"⚠ {result['status']}: {result.get('message', 'Unknown issue')}")
 

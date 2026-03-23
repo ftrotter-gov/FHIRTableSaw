@@ -14,6 +14,7 @@ Example:
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -26,31 +27,40 @@ from fhir_tablesaw_3tier.fhir4ds_integration import process_organization_ndjson
 
 def main() -> None:
     """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Load Organization NDJSON data using fhir4ds (SQL on FHIR approach)"
+    )
+    parser.add_argument("ndjson_file", help="Path to the NDJSON file")
+    parser.add_argument(
+        "--batchsize",
+        type=int,
+        default=5000,
+        help="Number of resources to process per batch (default: 5000)",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace existing table instead of appending",
+    )
+
+    args = parser.parse_args()
+
     # Load environment variables
     load_dotenv()
 
-    if len(sys.argv) < 2:
-        print("ERROR: Missing NDJSON file path")
-        print()
-        print("Usage:")
-        print(f"  python {sys.argv[0]} <path_to_ndjson_file>")
-        print()
-        print("Example:")
-        print(
-            f"  python {sys.argv[0]} /Volumes/eBolt/palantir/ndjson/initial/Organization.5.ndjson"
-        )
-        sys.exit(1)
-
-    ndjson_path = sys.argv[1]
+    ndjson_path = args.ndjson_file
+    if_exists = "replace" if args.replace else "append"
 
     print(f"Loading Organization data from: {ndjson_path}")
     print("NOTE: Filtering for clinical organizations (type='prov')")
+    print(f"Batch size: {args.batchsize} resources per batch")
     print()
 
     try:
         result = process_organization_ndjson(
             ndjson_path=ndjson_path,
-            if_exists="append",  # Change to 'replace' to drop/recreate table
+            if_exists=if_exists,
+            batch_size=args.batchsize,
         )
 
         print("=" * 60)
