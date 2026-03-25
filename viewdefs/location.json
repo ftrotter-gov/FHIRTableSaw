@@ -1,0 +1,101 @@
+{
+  "resourceType": "ViewDefinition",
+  "url": "http://example.org/fhir/ViewDefinition/location",
+  "name": "location",
+  "title": "Location View for NDH",
+  "status": "draft",
+  "description": "Flattened view of FHIR Location resources for National Directory of Healthcare Providers",
+  "resource": "Location",
+  "fhirVersion": ["4.0.1"],
+  "select": [
+    {
+      "column": [
+        {
+          "name": "resource_uuid",
+          "path": "id",
+          "description": "FHIR resource ID"
+        },
+        {
+          "name": "status",
+          "path": "status",
+          "description": "Location status (active, suspended, inactive)"
+        },
+        {
+          "name": "name",
+          "path": "name",
+          "description": "Name of the location"
+        },
+        {
+          "name": "description",
+          "path": "description",
+          "description": "Additional details about the location"
+        },
+        {
+          "name": "mode",
+          "path": "mode",
+          "description": "Instance or kind"
+        },
+        {
+          "name": "address_line1",
+          "path": "address.line[0]",
+          "description": "Address line 1"
+        },
+        {
+          "name": "address_line2",
+          "path": "address.line[1]",
+          "description": "Address line 2"
+        },
+        {
+          "name": "address_city",
+          "path": "address.city",
+          "description": "City"
+        },
+        {
+          "name": "address_state",
+          "path": "address.state",
+          "description": "State or province"
+        },
+        {
+          "name": "address_postal_code",
+          "path": "address.postalCode",
+          "description": "Postal code"
+        },
+        {
+          "name": "address_country",
+          "path": "address.country",
+          "description": "Country"
+        },
+        {
+          "name": "latitude",
+          "path": "position.latitude",
+          "description": "Latitude coordinate"
+        },
+        {
+          "name": "longitude",
+          "path": "position.longitude",
+          "description": "Longitude coordinate"
+        },
+        {
+          "name": "altitude",
+          "path": "position.altitude",
+          "description": "Altitude coordinate"
+        },
+        {
+          "name": "managing_organization_reference",
+          "path": "managingOrganization.reference",
+          "description": "Managing organization reference (e.g., 'Organization/123')"
+        },
+        {
+          "name": "part_of_location_reference",
+          "path": "partOf.reference",
+          "description": "Parent location reference (e.g., 'Location/456')"
+        },
+        {
+          "name": "availability_exceptions",
+          "path": "availabilityExceptions",
+          "description": "Description of availability exceptions"
+        }
+      ]
+    }
+  ]
+}

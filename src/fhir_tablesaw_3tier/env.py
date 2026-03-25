@@ -44,3 +44,24 @@ def require_env(name: str) -> str:
     if value is None or value.strip() == "":
         raise ValueError(f"Missing required environment variable: {name}")
     return value
+
+
+def get_db_url() -> str:
+    """Get the DATABASE_URL from environment.
+
+    Returns:
+        PostgreSQL connection URL
+
+    Raises:
+        ValueError: If DATABASE_URL is not set
+    """
+    return require_env("DATABASE_URL")
+
+
+def get_db_schema() -> str:
+    """Get the DB_SCHEMA from environment.
+
+    Returns:
+        Schema name (defaults to 'public' if not set)
+    """
+    return os.environ.get("DB_SCHEMA", "public")

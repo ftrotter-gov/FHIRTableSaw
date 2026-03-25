@@ -18,6 +18,7 @@ dependencies = [
   "pydantic>=2.7.0",
   "fhir-core>=1.1.3",
   "psycopg[binary]>=3.2.0",
+  "fhir4ds>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +28,6 @@ dev = [
 ]
 
 [project.scripts]
-fhir-tablesaw = "fhir_tablesaw.cli:main"
 fhir-tablesaw-3tier = "fhir_tablesaw_3tier.cli:main"
 
 [tool.setuptools]

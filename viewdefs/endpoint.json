@@ -1,0 +1,56 @@
+{
+  "resourceType": "ViewDefinition",
+  "url": "http://example.org/fhir/ViewDefinition/endpoint",
+  "name": "endpoint",
+  "title": "Endpoint View for NDH",
+  "status": "draft",
+  "description": "Flattened view of FHIR Endpoint resources for National Directory of Healthcare Providers",
+  "resource": "Endpoint",
+  "fhirVersion": ["4.0.1"],
+  "select": [
+    {
+      "column": [
+        {
+          "name": "resource_uuid",
+          "path": "id",
+          "description": "FHIR resource ID"
+        },
+        {
+          "name": "status",
+          "path": "status",
+          "description": "Operational state of the endpoint"
+        },
+        {
+          "name": "connection_type_system",
+          "path": "connectionType.system",
+          "description": "Connection type code system"
+        },
+        {
+          "name": "connection_type_code",
+          "path": "connectionType.code",
+          "description": "Connection type code"
+        },
+        {
+          "name": "connection_type_display",
+          "path": "connectionType.display",
+          "description": "Connection type display text"
+        },
+        {
+          "name": "name",
+          "path": "name",
+          "description": "Human-readable name for the endpoint"
+        },
+        {
+          "name": "address",
+          "path": "address",
+          "description": "Technical endpoint address/URL"
+        },
+        {
+          "name": "endpoint_rank",
+          "path": "extension.where(url='http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-rank').valuePositiveInt.first()",
+          "description": "Endpoint rank extension"
+        }
+      ]
+    }
+  ]
+}
