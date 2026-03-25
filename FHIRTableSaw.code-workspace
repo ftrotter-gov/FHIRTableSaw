@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../../../../Volumes/eBolt/palantir/ndjson/initial"
+		}
+	],
+	"settings": {
+		"python.languageServer": "Pylance",
+		"files.associations": {
+			"*.yaml": "yaml",
+			"*.yml": "yaml"
+		}
+	}
+}
