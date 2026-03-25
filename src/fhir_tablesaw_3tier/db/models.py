@@ -160,12 +160,17 @@ class AddressRow(Base):
 
     id: Mapped[int] = mapped_column(BIGINT_PK, primary_key=True, autoincrement=True)
     # Address is not a standalone FHIR resource; no resource_uuid.
+    # For fast dedupe/upsert we store a deterministic hash of the address components.
+    address_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     line1: Mapped[str | None] = mapped_column(String, nullable=True)
     line2: Mapped[str | None] = mapped_column(String, nullable=True)
     city: Mapped[str | None] = mapped_column(String, nullable=True)
     state: Mapped[str | None] = mapped_column(String, nullable=True)
     postal_code: Mapped[str | None] = mapped_column(String, nullable=True)
     country: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index("ix_address_hash", AddressRow.address_hash, unique=True)
 
 
 class PractitionerAddressRow(Base):
@@ -193,7 +198,8 @@ class TelecomRow(Base):
     value: Mapped[str] = mapped_column(String, nullable=False)
 
 
-Index("ix_telecom_type_value", TelecomRow.type, TelecomRow.value)
+# Make telecom lookups/upserts fast and safe.
+Index("ix_telecom_type_value", TelecomRow.type, TelecomRow.value, unique=True)
 
 
 class PractitionerTelecomRow(Base):
@@ -543,6 +549,15 @@ class ClinicalOrganizationAliasRow(Base):
 Index(
     "ix_clinical_org_alias_org",
     ClinicalOrganizationAliasRow.clinical_organization_id,
+)
+
+
+Index(
+    "ix_clinical_org_alias_uniq",
+    ClinicalOrganizationAliasRow.clinical_organization_id,
+    ClinicalOrganizationAliasRow.alias,
+    ClinicalOrganizationAliasRow.alias_type,
+    unique=True,
 )
 
 

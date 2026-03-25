@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import csv
 import traceback
 from collections import Counter
 from pathlib import Path
@@ -107,6 +108,32 @@ def log_failure(
     (out_dir / "whatwentwrong.log").write_text(msg, encoding="utf-8")
 
 
+def append_failure_uuid(
+    *,
+    log_dir: str | Path,
+    fhir_object_type: str,
+    filename: str,
+    failing_uuid: str,
+) -> None:
+    """Append a failing UUID to a consolidated CSV.
+
+    The CSV has a single column: 'failing_uuids'.
+    """
+
+    base = Path(log_dir)
+    safe_type = _safe_path_component(fhir_object_type)
+    out_dir = base / safe_type
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = out_dir / filename
+    is_new = not csv_path.exists()
+    with csv_path.open("a", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        if is_new:
+            w.writerow(["failing_uuids"])
+        w.writerow([str(failing_uuid)])
+
+
 def _safe_parse(
     parse_fn,
     raw: dict[str, Any],
@@ -114,7 +141,7 @@ def _safe_parse(
     dropped_counter: Counter[str],
     failures_counter: Counter[str],
     label: str,
-    fhir_server_url: str,
+    fhir_server_url: str | None,
     log_dir: str | Path,
 ):
     """Parse a FHIR resource into canonical, capturing dropped-repeat counts.
@@ -131,6 +158,45 @@ def _safe_parse(
         print(f"WARNING: parse failed for {label}: {ex}")
 
         rid = str(raw.get("id") or "unknown")
+
+        # Consolidate very common failures.
+        # 1) Practitioner + ClinicalOrganization missing NPI
+        if isinstance(ex, ValueError) and "missing required NPI" in str(ex):
+            try:
+                if label == "Practitioner":
+                    append_failure_uuid(
+                        log_dir=log_dir,
+                        fhir_object_type=label,
+                        filename="missing_an_npi.csv",
+                        failing_uuid=rid,
+                    )
+                    return None
+                if label == "ClinicalOrganization":
+                    append_failure_uuid(
+                        log_dir=log_dir,
+                        fhir_object_type=label,
+                        filename="missing_an_npi.csv",
+                        failing_uuid=rid,
+                    )
+                    return None
+            except Exception as csv_ex:  # noqa: BLE001
+                print(f"WARNING: failed to append consolidated CSV for {label}/{rid}: {csv_ex}")
+
+        # 2) PractitionerRole missing required practitioner + organization references
+        if isinstance(ex, ValueError) and "requires practitioner and organization references" in str(ex):
+            try:
+                if label == "PractitionerRole":
+                    append_failure_uuid(
+                        log_dir=log_dir,
+                        fhir_object_type=label,
+                        filename="missing_practicioner_and_organization.csv",
+                        failing_uuid=rid,
+                    )
+                    return None
+            except Exception as csv_ex:  # noqa: BLE001
+                print(f"WARNING: failed to append consolidated CSV for {label}/{rid}: {csv_ex}")
+
+        # Fall back to detailed per-resource artifacts.
         try:
             log_failure(
                 log_dir=log_dir,
@@ -169,7 +235,7 @@ def fetch_bundles(
 ) -> Iterable[dict[str, Any]]:
     """Yield resources of a given type from a FHIR server using search paging."""
 
-    params = {"_count": str(count)}
+    params = {"_count": str(count), "_total": "none"}
     if extra_params:
         params.update(extra_params)
 
@@ -202,8 +268,12 @@ def slurp_to_postgres(
     fhir_server_url: str,
     db_url: str | None = None,
     create_schema: bool = True,
-    count: int = 200,
+    count: int = 1000,
     hard_limit: int | None = None,
+    commit_every: int = 5000,
+    progress_every: int = 1000,
+    resolve_endpoints: bool = False,
+    http2: bool = True,
     log_dir: str | Path | None = None,
 ) -> None:
     """Ingest selected NDH resources from server into DB.
@@ -245,8 +315,8 @@ def slurp_to_postgres(
             started_at[label] = _now()
         if did_save:
             saved[label] += 1
-        # Print every 10 processed (default chatty)
-        if processed[label] % 10 == 0:
+        # Default less chatty; avoid massive stdout overhead.
+        if processed[label] % max(progress_every, 1) == 0:
             print(
                 _progress_line(
                     label,
@@ -257,31 +327,59 @@ def slurp_to_postgres(
                 )
             )
 
-    with httpx.Client(base_url=fhir_server_url.rstrip("/") + "/", timeout=30.0) as client:
+    # timers
+    fetch_time: Counter[str] = Counter()
+    parse_time: Counter[str] = Counter()
+    persist_time: Counter[str] = Counter()
+
+    def _timed(label: str, timer: Counter[str], fn):
+        t0 = _now()
+        out = fn()
+        timer[label] += _now() - t0
+        return out
+
+    with httpx.Client(
+        base_url=fhir_server_url.rstrip("/") + "/",
+        timeout=30.0,
+        http2=http2,
+        headers={"Accept": "application/fhir+json"},
+    ) as client:
         with Session(engine) as session:
             print(f"Starting slurp from {fhir_server_url} into schema {schema}")
 
             # Practitioners
             print("--- Practitioners ---")
-            for raw in fetch_bundles(
-                client=client,
-                resource_type="Practitioner",
-                count=count,
-                hard_limit=hard_limit,
+            for raw in _timed(
+                "Practitioner",
+                fetch_time,
+                lambda: fetch_bundles(
+                    client=client,
+                    resource_type="Practitioner",
+                    count=count,
+                    hard_limit=hard_limit,
+                ),
             ):
                 processed["Practitioner"] += 1
-                p = _safe_parse(
-                    practitioner_from_fhir_json,
-                    raw,
-                    dropped_counter=dropped,
-                    failures_counter=failures,
-                    label="Practitioner",
-                    fhir_server_url=fhir_server_url,
-                    log_dir=log_dir,
+                p = _timed(
+                    "Practitioner",
+                    parse_time,
+                    lambda: _safe_parse(
+                        practitioner_from_fhir_json,
+                        raw,
+                        dropped_counter=dropped,
+                        failures_counter=failures,
+                        label="Practitioner",
+                        fhir_server_url=fhir_server_url if resolve_endpoints else None,
+                        log_dir=log_dir,
+                    ),
                 )
                 if p is not None:
                     try:
-                        save_practitioner(session, p)
+                        _timed(
+                            "Practitioner",
+                            persist_time,
+                            lambda: save_practitioner(session, p),
+                        )
                         _tick("Practitioner", did_save=True)
                     except Exception as ex:  # noqa: BLE001
                         session.rollback()
@@ -298,29 +396,44 @@ def slurp_to_postgres(
                 else:
                     _tick("Practitioner", did_save=False)
 
+                if commit_every and processed["Practitioner"] % commit_every == 0:
+                    session.commit()
+
             session.commit()
 
             # Organizations -> ClinicalOrganization only (prov)
             print("--- Organizations (ClinicalOrganization) ---")
-            for raw in fetch_bundles(
-                client=client,
-                resource_type="Organization",
-                count=count,
-                hard_limit=hard_limit,
+            for raw in _timed(
+                "ClinicalOrganization",
+                fetch_time,
+                lambda: fetch_bundles(
+                    client=client,
+                    resource_type="Organization",
+                    count=count,
+                    hard_limit=hard_limit,
+                ),
             ):
                 processed["ClinicalOrganization"] += 1
-                org = _safe_parse(
-                    clinical_organization_from_fhir_json,
-                    raw,
-                    dropped_counter=dropped,
-                    failures_counter=failures,
-                    label="ClinicalOrganization",
-                    fhir_server_url=fhir_server_url,
-                    log_dir=log_dir,
+                org = _timed(
+                    "ClinicalOrganization",
+                    parse_time,
+                    lambda: _safe_parse(
+                        clinical_organization_from_fhir_json,
+                        raw,
+                        dropped_counter=dropped,
+                        failures_counter=failures,
+                        label="ClinicalOrganization",
+                        fhir_server_url=fhir_server_url,
+                        log_dir=log_dir,
+                    ),
                 )
                 if org is not None:
                     try:
-                        save_clinical_organization(session, org)
+                        _timed(
+                            "ClinicalOrganization",
+                            persist_time,
+                            lambda: save_clinical_organization(session, org),
+                        )
                         _tick("ClinicalOrganization", did_save=True)
                     except Exception as ex:  # noqa: BLE001
                         session.rollback()
@@ -337,29 +450,44 @@ def slurp_to_postgres(
                 else:
                     _tick("ClinicalOrganization", did_save=False)
 
+                if commit_every and processed["ClinicalOrganization"] % commit_every == 0:
+                    session.commit()
+
             session.commit()
 
             # PractitionerRole
             print("--- PractitionerRoles ---")
-            for raw in fetch_bundles(
-                client=client,
-                resource_type="PractitionerRole",
-                count=count,
-                hard_limit=hard_limit,
+            for raw in _timed(
+                "PractitionerRole",
+                fetch_time,
+                lambda: fetch_bundles(
+                    client=client,
+                    resource_type="PractitionerRole",
+                    count=count,
+                    hard_limit=hard_limit,
+                ),
             ):
                 processed["PractitionerRole"] += 1
-                role = _safe_parse(
-                    practitioner_role_from_fhir_json,
-                    raw,
-                    dropped_counter=dropped,
-                    failures_counter=failures,
-                    label="PractitionerRole",
-                    fhir_server_url=fhir_server_url,
-                    log_dir=log_dir,
+                role = _timed(
+                    "PractitionerRole",
+                    parse_time,
+                    lambda: _safe_parse(
+                        practitioner_role_from_fhir_json,
+                        raw,
+                        dropped_counter=dropped,
+                        failures_counter=failures,
+                        label="PractitionerRole",
+                        fhir_server_url=fhir_server_url,
+                        log_dir=log_dir,
+                    ),
                 )
                 if role is not None:
                     try:
-                        save_practitioner_role(session, role)
+                        _timed(
+                            "PractitionerRole",
+                            persist_time,
+                            lambda: save_practitioner_role(session, role),
+                        )
                         _tick("PractitionerRole", did_save=True)
                     except ValueError as ex:
                         # missing practitioner/org in DB slice
@@ -389,29 +517,44 @@ def slurp_to_postgres(
                 else:
                     _tick("PractitionerRole", did_save=False)
 
+                if commit_every and processed["PractitionerRole"] % commit_every == 0:
+                    session.commit()
+
             session.commit()
 
             # OrganizationAffiliation
             print("--- OrganizationAffiliations ---")
-            for raw in fetch_bundles(
-                client=client,
-                resource_type="OrganizationAffiliation",
-                count=count,
-                hard_limit=hard_limit,
+            for raw in _timed(
+                "OrganizationAffiliation",
+                fetch_time,
+                lambda: fetch_bundles(
+                    client=client,
+                    resource_type="OrganizationAffiliation",
+                    count=count,
+                    hard_limit=hard_limit,
+                ),
             ):
                 processed["OrganizationAffiliation"] += 1
-                aff = _safe_parse(
-                    organization_affiliation_from_fhir_json,
-                    raw,
-                    dropped_counter=dropped,
-                    failures_counter=failures,
-                    label="OrganizationAffiliation",
-                    fhir_server_url=fhir_server_url,
-                    log_dir=log_dir,
+                aff = _timed(
+                    "OrganizationAffiliation",
+                    parse_time,
+                    lambda: _safe_parse(
+                        organization_affiliation_from_fhir_json,
+                        raw,
+                        dropped_counter=dropped,
+                        failures_counter=failures,
+                        label="OrganizationAffiliation",
+                        fhir_server_url=fhir_server_url,
+                        log_dir=log_dir,
+                    ),
                 )
                 if aff is not None:
                     try:
-                        save_organization_affiliation(session, aff)
+                        _timed(
+                            "OrganizationAffiliation",
+                            persist_time,
+                            lambda: save_organization_affiliation(session, aff),
+                        )
                         _tick("OrganizationAffiliation", did_save=True)
                     except Exception as ex:  # noqa: BLE001
                         session.rollback()
@@ -427,6 +570,9 @@ def slurp_to_postgres(
                         )
                 else:
                     _tick("OrganizationAffiliation", did_save=False)
+
+                if commit_every and processed["OrganizationAffiliation"] % commit_every == 0:
+                    session.commit()
 
             session.commit()
 
@@ -450,4 +596,10 @@ def slurp_to_postgres(
         print(f"{k}: {saved[k]}")
 
     overall_elapsed = _now() - overall_started_at
+
+    print("\n--- timing summary (seconds) ---")
+    for label in sorted(set(fetch_time) | set(parse_time) | set(persist_time)):
+        print(
+            f"{label}: fetch={fetch_time[label]:0.1f} parse={parse_time[label]:0.1f} persist={persist_time[label]:0.1f}"
+        )
     print(f"\nTotal runtime: {overall_elapsed:0.1f}s")

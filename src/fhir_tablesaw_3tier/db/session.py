@@ -18,7 +18,13 @@ def create_engine_and_sessionmaker(
     future: bool = True,
 ):
     engine = create_engine(db_url, echo=echo, future=future)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=future)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=future,
+    )
     return engine, SessionLocal
 
 

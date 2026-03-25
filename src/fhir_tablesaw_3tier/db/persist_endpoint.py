@@ -5,54 +5,110 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from fhir_tablesaw_3tier.db.models import EndpointPayloadTypeRow, EndpointRow
 from fhir_tablesaw_3tier.db.persist_common import ensure_uuid
+from fhir_tablesaw_3tier.db.upsert import execute_returning_scalar, is_postgres
 from fhir_tablesaw_3tier.domain.endpoint import Endpoint
 
 
 def save_endpoint(session: Session, endpoint: Endpoint) -> Endpoint:
     euuid = ensure_uuid(endpoint.resource_uuid)
 
-    row = session.execute(select(EndpointRow).where(EndpointRow.resource_uuid == euuid)).scalar_one_or_none()
-    if row is None:
-        row = EndpointRow(
-            resource_uuid=euuid,
-            status=endpoint.status,
-            connection_type_code=endpoint.connection_type.code,
+    if is_postgres(session):
+        stmt = (
+            pg_insert(EndpointRow)
+            .values(
+                resource_uuid=euuid,
+                status=endpoint.status,
+                connection_type_system=endpoint.connection_type.system,
+                connection_type_code=endpoint.connection_type.code,
+                connection_type_display=endpoint.connection_type.display,
+                name=endpoint.name,
+                endpoint_rank=endpoint.endpoint_rank,
+            )
+            .on_conflict_do_update(
+                index_elements=[EndpointRow.resource_uuid],
+                set_={
+                    "status": endpoint.status,
+                    "connection_type_system": endpoint.connection_type.system,
+                    "connection_type_code": endpoint.connection_type.code,
+                    "connection_type_display": endpoint.connection_type.display,
+                    "name": endpoint.name,
+                    "endpoint_rank": endpoint.endpoint_rank,
+                },
+            )
+            .returning(EndpointRow.id)
         )
-        session.add(row)
+        endpoint_id = int(execute_returning_scalar(session, stmt))
+    else:
+        row = session.execute(
+            select(EndpointRow).where(EndpointRow.resource_uuid == euuid)
+        ).scalar_one_or_none()
+        if row is None:
+            row = EndpointRow(
+                resource_uuid=euuid,
+                status=endpoint.status,
+                connection_type_code=endpoint.connection_type.code,
+            )
+            session.add(row)
 
-    row.status = endpoint.status
-    row.connection_type_system = endpoint.connection_type.system
-    row.connection_type_code = endpoint.connection_type.code
-    row.connection_type_display = endpoint.connection_type.display
-    row.name = endpoint.name
-    row.endpoint_rank = endpoint.endpoint_rank
+        row.status = endpoint.status
+        row.connection_type_system = endpoint.connection_type.system
+        row.connection_type_code = endpoint.connection_type.code
+        row.connection_type_display = endpoint.connection_type.display
+        row.name = endpoint.name
+        row.endpoint_rank = endpoint.endpoint_rank
 
-    session.flush()
-    endpoint_id = int(row.id)
+        session.flush()
+        endpoint_id = int(row.id)
 
     # payload types (insert-only dedupe)
-    for p in endpoint.payload_types:
-        existing = session.execute(
-            select(EndpointPayloadTypeRow).where(
-                EndpointPayloadTypeRow.endpoint_id == endpoint_id,
-                EndpointPayloadTypeRow.payload_system == p.system,
-                EndpointPayloadTypeRow.payload_code == p.code,
-                EndpointPayloadTypeRow.payload_display == p.display,
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(
-                EndpointPayloadTypeRow(
-                    endpoint_id=endpoint_id,
-                    payload_system=p.system,
-                    payload_code=p.code,
-                    payload_display=p.display,
+    if endpoint.payload_types:
+        if is_postgres(session):
+            values = [
+                {
+                    "endpoint_id": endpoint_id,
+                    "payload_system": p.system,
+                    "payload_code": p.code,
+                    "payload_display": p.display,
+                }
+                for p in endpoint.payload_types
+            ]
+            stmt = (
+                pg_insert(EndpointPayloadTypeRow)
+                .values(values)
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        EndpointPayloadTypeRow.endpoint_id,
+                        EndpointPayloadTypeRow.payload_system,
+                        EndpointPayloadTypeRow.payload_code,
+                        EndpointPayloadTypeRow.payload_display,
+                    ]
                 )
             )
+            session.execute(stmt)
+        else:
+            for p in endpoint.payload_types:
+                existing = session.execute(
+                    select(EndpointPayloadTypeRow).where(
+                        EndpointPayloadTypeRow.endpoint_id == endpoint_id,
+                        EndpointPayloadTypeRow.payload_system == p.system,
+                        EndpointPayloadTypeRow.payload_code == p.code,
+                        EndpointPayloadTypeRow.payload_display == p.display,
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    session.add(
+                        EndpointPayloadTypeRow(
+                            endpoint_id=endpoint_id,
+                            payload_system=p.system,
+                            payload_code=p.code,
+                            payload_display=p.display,
+                        )
+                    )
 
     session.flush()
     return endpoint.model_copy(update={"id": endpoint_id})

@@ -91,8 +91,31 @@ def main(argv: list[str] | None = None) -> int:
     slurp.add_argument(
         "--count",
         type=int,
-        default=200,
+        default=1000,
         help="FHIR paging size (_count)",
+    )
+
+    slurp.add_argument(
+        "--commit-every",
+        type=int,
+        default=5000,
+        help="Commit every N saved resources per type (default: 5000). Set 0 to only commit at the end of each type.",
+    )
+    slurp.add_argument(
+        "--progress-every",
+        type=int,
+        default=1000,
+        help="Print progress every N processed resources (default: 1000)",
+    )
+    slurp.add_argument(
+        "--resolve-endpoints",
+        action="store_true",
+        help="(Slow) During Practitioner parse, perform additional GETs to validate referenced Endpoints.",
+    )
+    slurp.add_argument(
+        "--no-http2",
+        action="store_true",
+        help="Disable HTTP/2 (enabled by default). Useful for servers/proxies that misbehave.",
     )
     slurp.add_argument(
         "--hard-limit",
@@ -172,6 +195,10 @@ def main(argv: list[str] | None = None) -> int:
             count=args.count,
             hard_limit=args.hard_limit,
             log_dir=args.log_dir,
+            commit_every=args.commit_every,
+            progress_every=args.progress_every,
+            resolve_endpoints=bool(args.resolve_endpoints),
+            http2=not bool(args.no_http2),
         )
         return 0
 
