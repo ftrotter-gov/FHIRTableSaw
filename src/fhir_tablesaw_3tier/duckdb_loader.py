@@ -131,8 +131,9 @@ class FHIRDuckDBLoader:
         # Configure DuckDB to handle large datasets
         import duckdb
 
-        # Create DuckDB connection with increased limits
-        conn = duckdb.connect(database=":memory:")
+        # Create DuckDB connection with persistence
+        # Use the specified db_path for persistent storage
+        conn = duckdb.connect(database=db_path)
 
         # Set memory and temp directory limits
         conn.execute("SET memory_limit='8GB'")  # Increase memory limit
@@ -167,9 +168,9 @@ class FHIRDuckDBLoader:
             print(".", end="", flush=True)
 
         print()
-        print(f"\n✓ Loaded {total_resources} resources into DuckDB (in-memory)")
-        print(f"✓ DuckDB path marker: {db_path}")
-        print("  (Note: Actual persistence handled by CSV export in next stage)")
+        print(f"\n✓ Loaded {total_resources} resources into DuckDB")
+        print(f"✓ DuckDB saved: {db_path}")
+        print(f"  Database size: {Path(db_path).stat().st_size / (1024 * 1024):.1f} MB")
 
         return {
             "status": "success",
