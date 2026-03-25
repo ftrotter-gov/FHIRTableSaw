@@ -19,6 +19,8 @@ dependencies = [
   "fhir-core>=1.1.3",
   "psycopg[binary]>=3.2.0",
   "fhir4ds>=0.1.0",
+  "great-expectations>=0.18.0",
+  "pandas>=2.0.0",
 ]
 
 [project.optional-dependencies]
