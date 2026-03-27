@@ -562,6 +562,7 @@ def fetch_resources(
 
     # Some servers use non-FHIR `page_size` rather than `_count`.
     # We send both on the first request; for next links we follow server-provided URLs.
+    # However, some servers reject requests with both parameters, so we'll retry with just _count if needed.
     params: dict[str, str] | None = {
         "_count": str(count),
         "page_size": str(count),
@@ -570,6 +571,7 @@ def fetch_resources(
     url: str = resource_type
     seen = 0
     page_num = 0
+    first_request = True
 
     while True:
         ctx = {"resource_type": resource_type, "url": url, "params": params}
@@ -578,17 +580,57 @@ def fetch_resources(
             full = _build_full_url(client, url, params)
             print(f"GET {full}")
 
-        r = _request_with_retry(
-            client,
-            "GET",
-            url,
-            params=params,
-            retry=retry,
-            log_fn=log_fn,
-            context=ctx,
-            curl_debug=curl_debug,
-            curl_auth=curl_auth,
-        )
+        # On the first request, if we get a 400 error with both _count and page_size,
+        # retry with just _count (some servers reject both parameters together)
+        try:
+            r = _request_with_retry(
+                client,
+                "GET",
+                url,
+                params=params,
+                retry=retry,
+                log_fn=log_fn,
+                context=ctx,
+                curl_debug=curl_debug,
+                curl_auth=curl_auth,
+            )
+        except httpx.HTTPStatusError as ex:
+            # If this is the first request and we got a 400-level error with both params,
+            # retry with just _count
+            if first_request and params is not None and "page_size" in params and 400 <= ex.response.status_code < 500:
+                print(f"WARNING: Server rejected request with both _count and page_size (HTTP {ex.response.status_code})")
+                print("Retrying with only _count parameter...")
+                log_fn({
+                    **ctx,
+                    "kind": "parameter_conflict_retry",
+                    "status_code": ex.response.status_code,
+                    "original_params": params,
+                })
+                
+                # Retry with just _count
+                params = {"_count": str(count), "_total": "none"}
+                ctx = {"resource_type": resource_type, "url": url, "params": params}
+                
+                if url_print.print_urls:
+                    full = _build_full_url(client, url, params)
+                    print(f"GET {full}")
+                
+                r = _request_with_retry(
+                    client,
+                    "GET",
+                    url,
+                    params=params,
+                    retry=retry,
+                    log_fn=log_fn,
+                    context=ctx,
+                    curl_debug=curl_debug,
+                    curl_auth=curl_auth,
+                )
+            else:
+                # Not a parameter conflict or not the first request - re-raise
+                raise
+        
+        first_request = False
 
         # Diagnostics for unexpected payloads.
         status_code = r.status_code
