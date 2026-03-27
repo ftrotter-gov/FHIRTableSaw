@@ -22,6 +22,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -203,6 +204,15 @@ def process_file(
 
 def main() -> None:
     """Main entry point."""
+    # Load environment variables FIRST so we can use them for defaults
+    load_dotenv()
+
+    # Get defaults from environment variables
+    default_batch_size = int(os.environ.get("BATCH_SIZE", "5000"))
+    default_upload = os.environ.get("UPLOAD_TO_POSTGRESQL", "false").lower() in ("true", "1", "yes")
+    default_upload_mode = os.environ.get("UPLOAD_MODE", "replace")
+    default_temp_dir = os.environ.get("TEMP_DIR") or os.environ.get("FHIR_API_CACHE_FOLDER")
+
     parser = argparse.ArgumentParser(
         description="Batch load FHIR NDJSON files using FAST pipeline (31x faster!)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -216,6 +226,13 @@ Examples:
 
   # Production with custom temp directory
   python scripts/go_fast.py /path/to/ndjson/directory --temp-dir /fast/ssd/temp --upload
+
+Configuration:
+  Settings can be configured via .env file or CLI arguments (CLI takes precedence):
+    BATCH_SIZE - Resources per batch (default: 5000)
+    UPLOAD_TO_POSTGRESQL - Upload to PostgreSQL: true/false (default: false)
+    UPLOAD_MODE - PostgreSQL mode: replace/append/fail (default: replace)
+    TEMP_DIR or FHIR_API_CACHE_FOLDER - Directory for DuckDB temp files
         """,
     )
     parser.add_argument("directory", help="Directory containing NDJSON files")
@@ -227,29 +244,34 @@ Examples:
     parser.add_argument(
         "--upload",
         action="store_true",
-        help="Upload CSV files to PostgreSQL (default: CSV only)",
+        default=default_upload,
+        help=f"Upload CSV files to PostgreSQL (default from .env: {default_upload})",
+    )
+    parser.add_argument(
+        "--no-upload",
+        action="store_false",
+        dest="upload",
+        help="Disable PostgreSQL upload (CSV only)",
     )
     parser.add_argument(
         "--upload-mode",
         choices=["replace", "append", "fail"],
-        default="replace",
-        help="PostgreSQL upload mode (default: replace)",
+        default=default_upload_mode,
+        help=f"PostgreSQL upload mode (default from .env: {default_upload_mode})",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=5000,
-        help="Resources per batch for DuckDB loading (default: 5000)",
+        default=default_batch_size,
+        help=f"Resources per batch for DuckDB loading (default from .env: {default_batch_size})",
     )
     parser.add_argument(
         "--temp-dir",
-        help="Directory for DuckDB temp files (default: same as NDJSON)",
+        default=default_temp_dir,
+        help=f"Directory for DuckDB temp files (default from .env: {default_temp_dir or 'same as NDJSON'})",
     )
 
     args = parser.parse_args()
-
-    # Load environment variables
-    load_dotenv()
 
     # Validate directory
     directory = Path(args.directory)
@@ -268,11 +290,13 @@ Examples:
     print(f"{'=' * 70}")
     print(f"Directory: {directory}")
     print(f"Mode: {mode_text}")
+    print(f"Batch size: {args.batch_size} resources")
     print(f"Upload to PostgreSQL: {'YES' if args.upload else 'NO (CSV only)'}")
     if args.upload:
         print(f"Upload mode: {args.upload_mode}")
     if args.temp_dir:
         print(f"Temp directory: {args.temp_dir}")
+    print(f"Configuration: Using .env + CLI arguments")
     print(f"{'=' * 70}")
 
     files = find_ndjson_files(directory=directory, test_mode=args.test)
