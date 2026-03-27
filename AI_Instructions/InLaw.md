@@ -460,12 +460,176 @@ results = InLaw.run_all(
 - ✅ **Retained**: All core validation functionality, GX integration, reporting
 - ✅ **Added**: Better PostgreSQL schema support via config dictionary
 
-## DuckDB Support (Future)
+## Accessing the Underlying Pandas DataFrame
 
-The InLaw abstraction is designed to support DuckDB in the future:
+When you need to perform complex transformations beyond what Great Expectations provides, you can access the underlying pandas DataFrame from the GX Validator object.
 
-- Works with any SQLAlchemy engine
-- Config dictionary can specify connection type
-- SQL dialect handling can be added as needed
+### The Pattern
 
-Current implementation focuses on PostgreSQL, but the foundation is ready for DuckDB expansion.
+```python
+class ValidateComplexTransformation(InLaw):
+    title = "Validate complex calculated metrics"
+    
+    @staticmethod
+    def run(engine, config=None):
+        # Get the GX Validator
+        sql = "SELECT * FROM my_table"
+        gx_df = InLaw.to_gx_dataframe(sql, engine)
+        
+        # Access the underlying pandas DataFrame
+        pandas_df = gx_df.active_batch.data.dataframe
+        
+        # Perform complex pandas transformations
+        pandas_df['ratio'] = pandas_df['numerator'] / pandas_df['denominator']
+        pandas_df['category_sum'] = pandas_df.groupby('category')['value'].transform('sum')
+        
+        # Calculate metrics from transformed data
+        avg_ratio = pandas_df['ratio'].mean()
+        
+        # Validate using the metrics
+        min_expected = config.get('min_avg_ratio', 0.5)
+        max_expected = config.get('max_avg_ratio', 2.0)
+        
+        if min_expected <= avg_ratio <= max_expected:
+            return True
+        
+        return f"Average ratio {avg_ratio:.2f} outside expected range [{min_expected}, {max_expected}]"
+```
+
+### When to Use DataFrame Access
+
+Use this approach when you need:
+
+- **Complex pandas operations**: GroupBy, pivots, window functions
+- **Statistical calculations**: Percentiles, correlations, custom aggregations  
+- **Data transformations**: Derived columns, conditional logic
+- **Multi-step analysis**: Chained operations that GX doesn't support directly
+
+### Still Get InLaw's Clean Output
+
+This approach preserves InLaw's key benefit - clean, pretty-printed test results:
+
+```
+===== IN-LAW TESTS =====
+▶ Running: Validate complex calculated metrics ✅ PASS
+▶ Running: Check data distribution ✅ PASS
+▶ Running: Validate relationships ❌ FAIL: Average ratio 3.45 outside expected range [0.5, 2.0]
+Summary: 2 passed · 1 failed
+```
+
+### Example: Distribution Analysis
+
+```python
+class ValidateGenderDistribution(InLaw):
+    title = "Gender distribution should be within expected ranges"
+    
+    @staticmethod
+    def run(engine, config=None):
+        if config is None:
+            return "SKIPPED: No config provided"
+        
+        # Get practitioner data
+        sql = "SELECT gender FROM practitioners WHERE gender IS NOT NULL"
+        gx_df = InLaw.to_gx_dataframe(sql, engine)
+        
+        # Access pandas DataFrame for distribution analysis
+        df = gx_df.active_batch.data.dataframe
+        
+        # Calculate distribution
+        total_count = len(df)
+        gender_counts = df['gender'].value_counts()
+        
+        male_pct = (gender_counts.get('male', 0) / total_count) * 100
+        female_pct = (gender_counts.get('female', 0) / total_count) * 100
+        
+        # Validate distribution ranges
+        min_male = config.get('min_male_pct', 30)
+        max_male = config.get('max_male_pct', 70)
+        
+        if not (min_male <= male_pct <= max_male):
+            return f"Male percentage {male_pct:.1f}% outside range [{min_male}, {max_male}]"
+        
+        if not (30 <= female_pct <= 70):
+            return f"Female percentage {female_pct:.1f}% outside expected range"
+        
+        return True
+```
+
+### Example: Outlier Detection
+
+```python
+class ValidateNoExtremeOutliers(InLaw):
+    title = "No extreme outliers in value field"
+    
+    @staticmethod
+    def run(engine, config=None):
+        sql = "SELECT value FROM measurements WHERE value IS NOT NULL"
+        gx_df = InLaw.to_gx_dataframe(sql, engine)
+        
+        # Get pandas DataFrame
+        df = gx_df.active_batch.data.dataframe
+        
+        # Calculate IQR for outlier detection
+        q1 = df['value'].quantile(0.25)
+        q3 = df['value'].quantile(0.75)
+        iqr = q3 - q1
+        
+        # Define extreme outliers (beyond 3 * IQR)
+        lower_fence = q1 - (3 * iqr)
+        upper_fence = q3 + (3 * iqr)
+        
+        # Count outliers
+        outliers = df[(df['value'] < lower_fence) | (df['value'] > upper_fence)]
+        outlier_count = len(outliers)
+        outlier_pct = (outlier_count / len(df)) * 100
+        
+        max_outlier_pct = config.get('max_outlier_pct', 1.0) if config else 1.0
+        
+        if outlier_pct <= max_outlier_pct:
+            return True
+        
+        return f"Found {outlier_pct:.2f}% extreme outliers (limit: {max_outlier_pct}%)"
+```
+
+### Key Points
+
+1. ✅ **Access via**: `gx_df.active_batch.data.dataframe`
+2. ✅ **Full pandas API**: All pandas operations available
+3. ✅ **Preserve InLaw output**: Return True/str maintains clean reporting
+4. ✅ **Complex validations**: Use when GX expectations aren't enough
+5. ✅ **Best of both worlds**: Pandas flexibility + InLaw simplicity
+
+## DuckDB Support
+
+The InLaw abstraction fully supports DuckDB:
+
+- Works with any SQLAlchemy engine (PostgreSQL, DuckDB, SQLite, etc.)
+- Config dictionary can specify connection parameters
+- SQL dialect differences handled automatically by SQLAlchemy
+- Same InLaw pattern works across all database backends
+
+### DuckDB Example
+
+```python
+import duckdb
+from sqlalchemy import create_engine
+
+# Create DuckDB engine
+duckdb_path = "../saw_cache/practitioner.duckdb"
+engine = create_engine(f"duckdb:///{duckdb_path}")
+
+# Use InLaw exactly the same way
+config = {
+    'min_expected_rows': 1000,
+    'max_expected_rows': 2000,
+}
+
+results = InLaw.run_all(
+    engine=engine,
+    inlaw_dir='dataexpectations/practitioner_expectations',
+    config=config
+)
+```
+
+The InLaw pattern is database-agnostic - write once, run anywhere!
+

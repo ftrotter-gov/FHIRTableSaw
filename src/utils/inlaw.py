@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Union, List, Dict, Any, Optional, cast, TYPE_CHECKING
 import sqlalchemy
 import pandas as pd
-from great_expectations.dataset import PandasDataset
 
 if TYPE_CHECKING:
-    from great_expectations.dataset import PandasDataset
-    from great_expectations.expectations.core import *
+    pass  # Type hints for GX validators if needed
+
 
 try:
     import great_expectations as gx
@@ -87,7 +86,7 @@ class InLaw(ABC):
         pass
 
     @staticmethod
-    def sql_to_gx_df(*, sql: str, engine) -> PandasDataset:
+    def sql_to_gx_df(*, sql: str, engine):
         """
         Convert SQL query result to Great Expectations DataFrame.
 
@@ -96,8 +95,9 @@ class InLaw(ABC):
             engine: SQLAlchemy engine
 
         Returns:
-            Great Expectations DataFrame
+            Great Expectations Validator (works like PandasDataset in older GX)
         """
+
         try:
             # Execute SQL and get pandas DataFrame
             with engine.connect() as conn:
@@ -111,32 +111,35 @@ class InLaw(ABC):
                     category=UserWarning
                 )
 
-                # Convert to Great Expectations DataFrame using the correct API
+                # Use GX 1.x API - create validator directly from pandas DataFrame
+                # This returns a Validator object which has all the expect_* methods
                 context = gx.get_context()
-                datasource = context.sources.add_pandas("pandas_datasource")
-                data_asset = datasource.add_dataframe_asset("dataframe_asset")
-                batch_request = data_asset.build_batch_request(dataframe=pandas_df)
-                gx_df = cast(PandasDataset, context.get_validator(batch_request=batch_request))
+                
+                # Create a validator from pandas dataframe
+                # The validator object has the same API as the old PandasDataset
+                validator = context.sources.pandas_default.read_dataframe(pandas_df)
 
-            return gx_df
+            return validator
 
         except Exception as e:
             raise RuntimeError(f"Failed to execute SQL and create GX DataFrame: {e}")
 
+
     @staticmethod
-    def to_gx_dataframe(sql: str, engine) -> PandasDataset:
+    def to_gx_dataframe(sql: str, engine):
         """
         Legacy method name - use sql_to_gx_df instead.
-        Convert SQL query result to Great Expectations DataFrame.
+        Convert SQL query result to Great Expectations Validator.
 
         Args:
             sql: SQL query string
             engine: SQLAlchemy engine
 
         Returns:
-            Great Expectations DataFrame
+            Great Expectations Validator
         """
         return InLaw.sql_to_gx_df(sql=sql, engine=engine)
+
 
     @staticmethod
     def ansi_green(text: str) -> str:
