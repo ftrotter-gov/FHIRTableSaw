@@ -227,3 +227,6 @@ evidence/.evidence/template/
 evidence/.evidence/meta/
 evidence/static/data/
 evidence/*.options.yaml
+
+# Evidence connection configuration (contains credentials)
+evidence/sources/*/connection.yaml

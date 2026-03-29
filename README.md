@@ -1,10 +1,29 @@
 # FHIR Table Saw
 
 ## About
-This project intelligently flattens an existing FHIR instance into a lossy flat relational table structure.. based on some rules about how to normalize. When there is data that is not covered in the flattening map.. it is ignored.
 
+This project intelligently flattens an existing FHIR instance into a lossy flat relational table structure based on some rules about how to normalize. When there is data that is not covered in the flattening map, it is ignored.
 
+FHIRTableSaw uses SQL-on-FHIR ViewDefinitions to transform FHIR resources into tabular formats, processing data through a high-performance DuckDB pipeline that's 31x faster than traditional approaches.
 
+## Quick Start
+
+1. **Install dependencies**: `pip install -r requirements.txt`
+2. **Configure environment**: Copy `env.example` to `.env` and configure your settings
+3. **Load FHIR data**: `python scripts/go_fast.py /path/to/ndjson/directory`
+4. **Query results**: Use DuckDB files directly or upload to PostgreSQL
+
+## Documentation
+
+Detailed documentation is available in the [docs/](docs/) directory:
+
+- **[Quick Start Guides](docs/)** - Get started quickly with SQL-on-FHIR and data loading
+- **[Pipeline Guide](docs/GO_FAST_ENV_CONFIG.md)** - Configure and run the fast DuckDB pipeline
+- **[DuckDB Queries](docs/DUCKDB_QUERY_GUIDE.md)** - Query DuckDB files created by the pipeline
+- **[Evidence Reports](docs/EVIDENCE_REPORTS.md)** - Generate data reports and dashboards
+- **[Multi-Source Setup](docs/MULTI_SOURCE_SETUP.md)** - Work with multiple data sources
+
+See the [docs/README.md](docs/README.md) for a complete documentation index.
 
 ## Policies
 
