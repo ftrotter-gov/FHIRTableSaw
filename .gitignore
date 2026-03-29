@@ -229,4 +229,5 @@ evidence/static/data/
 evidence/*.options.yaml
 
 # Evidence connection configuration (contains credentials)
-evidence/sources/*/connection.yaml
+evidence/sources/*/*connection*yaml
+evidence/static_site_content/*
