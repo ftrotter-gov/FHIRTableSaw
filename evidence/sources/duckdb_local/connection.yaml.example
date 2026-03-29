@@ -1,0 +1,20 @@
+# DuckDB connection for FHIRTableSaw Evidence Reports
+# Copy this file to connection.yaml and configure your DuckDB file path
+#
+# IMPORTANT: The go_fast.py script creates DuckDB files alongside NDJSON files:
+#   Example: /path/to/Practitioner.ndjson → /path/to/Practitioner.duckdb
+#
+# To use with Evidence, symlink one of these DuckDB files into this directory:
+#
+#   ln -s /Volumes/eBolt/palantir/ndjson/initial/Practitioner.duckdb \
+#         evidence/sources/duckdb_local/Practitioner.duckdb
+#
+# Then update the filename below to match your symlinked file.
+# The filename is relative to: evidence/sources/duckdb_local/
+#
+# For Docker: mount the DuckDB file as a volume in docker-compose.yml
+
+name: duckdb_local
+type: duckdb
+options:
+  filename: Practitioner.duckdb

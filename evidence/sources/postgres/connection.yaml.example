@@ -1,0 +1,29 @@
+# PostgreSQL connection for FHIRTableSaw Evidence Reports
+# Copy this file to connection.yaml and configure with your credentials
+#
+# OPTION 1: Direct configuration (simple, but not recommended for production)
+# Uncomment and fill in your actual values:
+#
+# name: postgres
+# type: postgres
+# options:
+#   host: your-postgres-host.rds.amazonaws.com
+#   port: 5432
+#   database: postgres
+#   user: postgres
+#   password: your-password-here
+#   ssl: false
+
+# OPTION 2: Use environment variables (recommended for security)
+# Set these environment variables before running Evidence:
+#   EVIDENCE_SOURCE__postgres__host=your-postgres-host.rds.amazonaws.com
+#   EVIDENCE_SOURCE__postgres__port=5432
+#   EVIDENCE_SOURCE__postgres__user=postgres
+#   EVIDENCE_SOURCE__postgres__password=your-password-here
+#   EVIDENCE_SOURCE__postgres__database=postgres
+#   EVIDENCE_SOURCE__postgres__ssl=false
+#
+# Then use this minimal configuration:
+name: postgres
+type: postgres
+options: {}
