@@ -11,8 +11,9 @@ evidence/
 ├── Dockerfile                 # Multi-stage Docker build
 ├── docker-compose.yml         # Dev server + static build services
 ├── package.json               # Node dependencies (Evidence, PG, DuckDB)
+├── package-lock.json          # Lockfile for reproducible installs
 ├── evidence.config.yaml       # Evidence theme and plugin config
-├── .npmrc                     # npm configuration
+├── .npmrc                     # npm configuration (legacy-peer-deps)
 ├── .gitignore                 # Evidence-specific ignores
 ├── .evidence/
 │   └── customization/
@@ -39,30 +40,32 @@ evidence/
 ### 1. Configure PostgreSQL Credentials
 
 Evidence reads PostgreSQL connection details from environment variables.
-You have two options:
+The `docker-compose.yml` maps from the project's existing `.env` variables
+(`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_DATABASE`, `DB_PORT`) to
+Evidence's `EVIDENCE_SOURCE__postgres__*` format. **The `.env` file is
+never modified by this setup.**
 
-**Option A**: Add Evidence-specific variables to the project `.env` file
-(the existing `.env` at the project root, which is NOT modified by this setup):
+If your `.env` already contains these variables (which it should for the
+FHIRTableSaw project), no additional configuration is needed:
 
 ```bash
-# Add these lines to your existing .env file:
-EVIDENCE_PG_HOST=your-pg-host
-EVIDENCE_PG_PORT=5432
-EVIDENCE_PG_DATABASE=ndh
-EVIDENCE_PG_USER=postgres
-EVIDENCE_PG_PASSWORD=your-password
-EVIDENCE_PG_SSL=false
+# These variables in .env are used automatically:
+DB_HOST=your-pg-host
+DB_PORT=5432
+DB_DATABASE=postgres
+DB_USER=postgres
+DB_PASSWORD=your-password
 ```
 
-**Option B**: Export environment variables directly before running:
+Alternatively, you can export Evidence environment variables directly:
 
 ```bash
 export EVIDENCE_SOURCE__postgres__host=your-pg-host
 export EVIDENCE_SOURCE__postgres__port=5432
-export EVIDENCE_SOURCE__postgres__database=ndh
+export EVIDENCE_SOURCE__postgres__database=postgres
 export EVIDENCE_SOURCE__postgres__user=postgres
 export EVIDENCE_SOURCE__postgres__password=your-password
-export EVIDENCE_SOURCE__postgres__ssl=false
+export EVIDENCE_SOURCE__postgres__ssl=no-verify
 ```
 
 ### 2. Start the Development Server
@@ -95,9 +98,10 @@ npm install
 # Set PostgreSQL credentials
 export EVIDENCE_SOURCE__postgres__host=your-pg-host
 export EVIDENCE_SOURCE__postgres__port=5432
-export EVIDENCE_SOURCE__postgres__database=ndh
+export EVIDENCE_SOURCE__postgres__database=postgres
 export EVIDENCE_SOURCE__postgres__user=postgres
 export EVIDENCE_SOURCE__postgres__password=your-password
+export EVIDENCE_SOURCE__postgres__ssl=no-verify
 
 # Run the dev server
 npm run dev
@@ -134,20 +138,20 @@ from the `sources/duckdb_local/` directory.
 Create new `.md` files in `evidence/pages/`. Evidence uses markdown with
 embedded SQL and components:
 
-```markdown
+````markdown
 ---
 title: My New Report
 ---
 
 # My Report Title
 
-\`\`\`sql my_query
+```sql my_query
 SELECT column_a, column_b
 FROM postgres.my_source_query
-\`\`\`
+```
 
 <DataTable data={my_query} />
-```
+````
 
 Source queries (`.sql` files in `sources/<source_name>/`) use the
 native SQL dialect of that database. Page queries reference extracted data
@@ -172,10 +176,10 @@ directory.
    |---|---|
    | `EVIDENCE_SOURCE__postgres__host` | Your PostgreSQL host |
    | `EVIDENCE_SOURCE__postgres__port` | `5432` |
-   | `EVIDENCE_SOURCE__postgres__database` | `ndh` |
+   | `EVIDENCE_SOURCE__postgres__database` | `postgres` |
    | `EVIDENCE_SOURCE__postgres__user` | `postgres` |
    | `EVIDENCE_SOURCE__postgres__password` | Your password |
-   | `EVIDENCE_SOURCE__postgres__ssl` | `false` (optional) |
+   | `EVIDENCE_SOURCE__postgres__ssl` | `no-verify` (optional) |
 
 5. Push changes to `main` or trigger the workflow manually
 
@@ -234,3 +238,9 @@ NODE_OPTIONS="--max-old-space-size=4096" npm run sources
 docker compose up evidence-dev --build -d
 # Or change the port mapping in docker-compose.yml
 ```
+
+### npm peer dependency errors
+
+The `.npmrc` includes `legacy-peer-deps=true` to resolve TypeScript
+version conflicts with Evidence's Svelte dependencies. This is set
+automatically and should not need manual intervention.

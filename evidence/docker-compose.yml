@@ -7,6 +7,10 @@
 #   evidence-build - One-shot static build for GitHub Pages
 #
 # PostgreSQL credentials are read from the project root .env file.
+# The .env file uses DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE
+# variables which are mapped to Evidence's EVIDENCE_SOURCE__postgres__*
+# environment variables below.
+#
 # DuckDB .db files can be bind-mounted into sources/duckdb_local/.
 #
 # Usage:
@@ -40,15 +44,16 @@ services:
       # Adjust the host path below to point at your .db files
       # Example: - ../data/fhirtablesaw.duckdb:/app/sources/duckdb_local/fhirtablesaw.duckdb:ro
     environment:
-      # PostgreSQL connection credentials for Evidence
-      # These are read from the project's .env file via env_file below,
-      # then mapped to Evidence's expected environment variable names.
-      - EVIDENCE_SOURCE__postgres__host=${EVIDENCE_PG_HOST:-localhost}
-      - EVIDENCE_SOURCE__postgres__port=${EVIDENCE_PG_PORT:-5432}
-      - EVIDENCE_SOURCE__postgres__database=${EVIDENCE_PG_DATABASE:-ndh}
-      - EVIDENCE_SOURCE__postgres__user=${EVIDENCE_PG_USER:-postgres}
-      - EVIDENCE_SOURCE__postgres__password=${EVIDENCE_PG_PASSWORD:-postgres}
-      - EVIDENCE_SOURCE__postgres__ssl=${EVIDENCE_PG_SSL:-false}
+      # PostgreSQL connection credentials for Evidence.
+      # Mapped from the project .env variables (DB_HOST, DB_USER, etc.)
+      # to Evidence's expected EVIDENCE_SOURCE__postgres__* format.
+      # The .env file is loaded via env_file below and is NOT modified.
+      - EVIDENCE_SOURCE__postgres__host=${DB_HOST:-localhost}
+      - EVIDENCE_SOURCE__postgres__port=${DB_PORT:-5432}
+      - EVIDENCE_SOURCE__postgres__database=${DB_DATABASE:-postgres}
+      - EVIDENCE_SOURCE__postgres__user=${DB_USER:-postgres}
+      - EVIDENCE_SOURCE__postgres__password=${DB_PASSWORD:-postgres}
+      - EVIDENCE_SOURCE__postgres__ssl=no-verify
     env_file:
       # Read the project root .env (will NOT be edited or overwritten)
       - path: ../.env
@@ -69,12 +74,12 @@ services:
       # Mount sources so the build can read latest queries
       - ./sources:/app/sources
     environment:
-      - EVIDENCE_SOURCE__postgres__host=${EVIDENCE_PG_HOST:-localhost}
-      - EVIDENCE_SOURCE__postgres__port=${EVIDENCE_PG_PORT:-5432}
-      - EVIDENCE_SOURCE__postgres__database=${EVIDENCE_PG_DATABASE:-ndh}
-      - EVIDENCE_SOURCE__postgres__user=${EVIDENCE_PG_USER:-postgres}
-      - EVIDENCE_SOURCE__postgres__password=${EVIDENCE_PG_PASSWORD:-postgres}
-      - EVIDENCE_SOURCE__postgres__ssl=${EVIDENCE_PG_SSL:-false}
+      - EVIDENCE_SOURCE__postgres__host=${DB_HOST:-localhost}
+      - EVIDENCE_SOURCE__postgres__port=${DB_PORT:-5432}
+      - EVIDENCE_SOURCE__postgres__database=${DB_DATABASE:-postgres}
+      - EVIDENCE_SOURCE__postgres__user=${DB_USER:-postgres}
+      - EVIDENCE_SOURCE__postgres__password=${DB_PASSWORD:-postgres}
+      - EVIDENCE_SOURCE__postgres__ssl=no-verify
       - BASE_PATH=/FHIRTableSaw
     env_file:
       - path: ../.env
@@ -83,5 +88,5 @@ services:
     command:
       - |
         npm run sources && \
-        EVIDENCE_BUILD_DIR=./build$${BASE_PATH} npm run build && \
+        npm run build && \
         echo "=== Static build complete. Output in ./build/ ==="
