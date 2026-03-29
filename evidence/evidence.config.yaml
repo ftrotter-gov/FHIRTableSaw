@@ -70,4 +70,4 @@ plugins:
     "@evidence-dev/postgres": {}
 
 deployment:
-  basePath: /FHIRTableSaw
+  basePath: ""
