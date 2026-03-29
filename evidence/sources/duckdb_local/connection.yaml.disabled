@@ -1,0 +1,16 @@
+# DuckDB connection for FHIRTableSaw Evidence Reports
+# WARNING: This file should be configured per-user and is excluded from git
+#
+# The go_fast.py script creates DuckDB files alongside NDJSON files:
+#   /path/to/Practitioner.ndjson → /path/to/Practitioner.duckdb
+#
+# To use DuckDB with Evidence, symlink one of these files here:
+#   ln -s /Volumes/eBolt/palantir/ndjson/initial/Practitioner.duckdb evidence/sources/duckdb_local/Practitioner.duckdb
+#
+# Then update the filename below to match your symlinked file.
+# The filename is relative to: evidence/sources/duckdb_local/
+
+name: duckdb_local
+type: duckdb
+options:
+  filename: Practitioner.duckdb
