@@ -306,6 +306,36 @@ def _parse_args(argv: list[str] | None = None) -> tuple[DownloadArgs, ProcessArg
     return download_args, process_args
 
 
+def _check_ndjson_status(*, cache_folder: Path, resource_types: list[str]) -> dict[str, bool]:
+    """Check which NDJSON files already exist.
+    
+    Returns:
+        Dict mapping resource type to whether NDJSON exists
+    """
+    status = {}
+    for rt in resource_types:
+        ndjson_path = _ndjson_path_for(cache_folder=cache_folder, resource_type=rt)
+        status[rt] = ndjson_path.exists() and ndjson_path.stat().st_size > 0
+    return status
+
+
+def _check_processing_status(*, cache_folder: Path, resource_type: str, viewdef_name: str) -> dict[str, bool]:
+    """Check which processing stages are complete for a resource type.
+    
+    Returns:
+        Dict with keys: 'ndjson', 'duckdb', 'csv'
+    """
+    ndjson_path = _ndjson_path_for(cache_folder=cache_folder, resource_type=resource_type)
+    duckdb_path = ndjson_path.with_suffix(".duckdb")
+    csv_path = ndjson_path.parent / f"{ndjson_path.stem}_{viewdef_name}.csv"
+    
+    return {
+        "ndjson": ndjson_path.exists() and ndjson_path.stat().st_size > 0,
+        "duckdb": duckdb_path.exists() and duckdb_path.stat().st_size > 0,
+        "csv": csv_path.exists() and csv_path.stat().st_size > 0,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     # Load .env as the source of truth.
     load_dotenv(override=True)
@@ -328,32 +358,62 @@ def main(argv: list[str] | None = None) -> int:
     if db_url and not process_args.no_upload:
         do_upload = _postgres_reachable(database_url=db_url)
 
-    print("=" * 80)
-    print("FHIRTableSaw go.py runner")
-    print("=" * 80)
-    print(f"FHIR server URL: {fhir_server_url}")
-    print(f"Cache folder:   {cache_folder}")
-    print(f"Postgres upload: {'YES' if do_upload and not process_args.no_upload else 'NO'}")
-    print("=" * 80, flush=True)
-
-    # --- Stage 1: Download resources to NDJSON (overwrite). ---
-    dl_cmd = _build_download_cmd(
-        fhir_server_url=fhir_server_url,
-        cache_folder=cache_folder,
-        args=download_args,
-    )
-    rc = _run_cmd(cmd=dl_cmd, title="STAGE 1: Download FHIR -> NDJSON (overwrite cache)")
-    if rc != 0:
-        print(f"ERROR: download stage failed with exit code {rc}")
-        return rc
-
-    # Determine which resource types were requested for download.
+    # Determine which resource types were requested.
     requested_types = list(SUPPORTED_RESOURCE_TYPES)
     if download_args.resource_types:
         requested_types = [x.strip() for x in download_args.resource_types.split(",") if x.strip()]
 
-    # --- Stage 2+: Process each resource type via FAST pipeline. ---
+    # Check what's already completed
+    ndjson_status = _check_ndjson_status(cache_folder=cache_folder, resource_types=requested_types)
+    all_ndjson_exist = all(ndjson_status.values())
+    some_ndjson_exist = any(ndjson_status.values())
+
+    print("=" * 80)
+    print("FHIRTableSaw go.py runner (with intelligent resume)")
+    print("=" * 80)
+    print(f"FHIR server URL: {fhir_server_url}")
+    print(f"Cache folder:   {cache_folder}")
+    print(f"DB Schema:      {os.environ.get('DB_SCHEMA', 'public')}")
+    print(f"Postgres upload: {'YES' if do_upload and not process_args.no_upload else 'NO'}")
+    print("=" * 80)
+    
+    # Show status of existing files
+    if some_ndjson_exist:
+        print("\nExisting NDJSON files detected:")
+        for rt, exists in ndjson_status.items():
+            if exists:
+                ndjson_path = _ndjson_path_for(cache_folder=cache_folder, resource_type=rt)
+                size_mb = ndjson_path.stat().st_size / (1024 * 1024)
+                print(f"  ✓ {rt}: {ndjson_path.name} ({size_mb:.1f} MB)")
+        
+        if all_ndjson_exist:
+            print("\n⚠ All NDJSON files exist. Skipping download stage.")
+            print("  To force re-download, delete the NDJSON files or use a different directory.")
+        else:
+            print("\n⚠ Some NDJSON files exist. Will download missing ones only.")
+    
+    print("=" * 80, flush=True)
+
+    # --- Stage 1: Download resources to NDJSON (conditionally skip). ---
+    if all_ndjson_exist:
+        print("\n" + "=" * 80)
+        print("STAGE 1: SKIPPED (all NDJSON files already exist)")
+        print("=" * 80)
+    else:
+        dl_cmd = _build_download_cmd(
+            fhir_server_url=fhir_server_url,
+            cache_folder=cache_folder,
+            args=download_args,
+        )
+        rc = _run_cmd(cmd=dl_cmd, title="STAGE 1: Download FHIR -> NDJSON")
+        if rc != 0:
+            print(f"ERROR: download stage failed with exit code {rc}")
+            return rc
+
+    # --- Stage 2+: Process each resource type via FAST pipeline (with intelligent resume). ---
     failures: list[str] = []
+    skipped: list[str] = []
+    
     for rt in requested_types:
         ndjson_path = _ndjson_path_for(cache_folder=cache_folder, resource_type=rt)
         if not ndjson_path.exists():
@@ -379,15 +439,38 @@ def main(argv: list[str] | None = None) -> int:
         duckdb_path = ndjson_path.with_suffix(".duckdb")
         csv_path = ndjson_path.parent / f"{ndjson_path.stem}_{viewdef_name}.csv"
 
-        # Ensure overwrite semantics for all artifacts.
-        try:
-            if duckdb_path.exists():
-                duckdb_path.unlink()
-            if csv_path.exists():
-                csv_path.unlink()
-        except Exception as ex:  # noqa: BLE001
-            failures.append(f"{rt}: failed removing old artifacts: {ex}")
-            continue
+        # Check if processing is already complete
+        status = _check_processing_status(
+            cache_folder=cache_folder,
+            resource_type=rt,
+            viewdef_name=viewdef_name
+        )
+        
+        # If CSV exists and we're not uploading, or if everything exists including upload, skip
+        if status["csv"]:
+            csv_size_mb = csv_path.stat().st_size / (1024 * 1024)
+            print(f"\n⚠ {rt}: CSV already exists ({csv_size_mb:.1f} MB)")
+            
+            if not do_upload:
+                print(f"   Skipping processing for {rt} (CSV complete, no upload needed)")
+                skipped.append(f"{rt}: CSV exists, no upload needed")
+                continue
+            else:
+                print(f"   CSV exists but will still attempt PostgreSQL upload")
+                # Continue to processing to handle upload
+        
+        # Remove old artifacts if we're reprocessing
+        # Note: DuckDB will be handled by force_reload flag
+        # We keep CSV if it exists and we're just uploading
+        if not status["csv"]:
+            try:
+                if duckdb_path.exists():
+                    duckdb_path.unlink()
+                if csv_path.exists():
+                    csv_path.unlink()
+            except Exception as ex:  # noqa: BLE001
+                failures.append(f"{rt}: failed removing old artifacts: {ex}")
+                continue
 
         cmd = _build_process_cmd(
             ndjson_path=ndjson_path,
@@ -404,13 +487,19 @@ def main(argv: list[str] | None = None) -> int:
     print("\n" + "=" * 80)
     print("RUN COMPLETE")
     print("=" * 80)
+    
+    if skipped:
+        print(f"\nSkipped ({len(skipped)} resource types - already complete):")
+        for s in skipped:
+            print(f"  ⊘ {s}")
+    
     if failures:
-        print(f"Failures: {len(failures)}")
+        print(f"\nFailures ({len(failures)} resource types):")
         for f in failures:
-            print(f"- {f}")
+            print(f"  ✗ {f}")
         return 1
 
-    print("✓ All requested resource types processed successfully")
+    print("\n✓ All requested resource types processed successfully")
     return 0
 
 

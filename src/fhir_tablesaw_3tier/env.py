@@ -114,3 +114,64 @@ def get_db_schema() -> str:
         Schema name (defaults to 'public' if not set)
     """
     return os.environ.get("DB_SCHEMA", "public")
+
+
+def get_data_source_config(*, source: str) -> tuple[str, str]:
+    """Get the data directory and schema for a specific data source.
+    
+    Args:
+        source: One of 'test', 'cms', or 'palantir'
+    
+    Returns:
+        Tuple of (data_directory, schema_name)
+    
+    Raises:
+        ValueError: If source is invalid or required env vars are not set
+    """
+    source_upper = source.upper()
+    
+    if source.lower() == "test":
+        dir_var = "TEST_FHIR_DIR"
+        schema_var = "TEST_FHIR_SCHEMA"
+    elif source.lower() == "cms":
+        dir_var = "CMS_FHIR_DIR"
+        schema_var = "CMS_FHIR_SCHEMA"
+    elif source.lower() == "palantir":
+        dir_var = "PALANTIR_FHIR_DIR"
+        schema_var = "PALANTIR_FHIR_SCHEMA"
+    else:
+        raise ValueError(f"Invalid data source: {source}. Must be 'test', 'cms', or 'palantir'")
+    
+    data_dir = os.environ.get(dir_var)
+    if not data_dir or data_dir.strip() == "" or "/REPLACEME/" in data_dir:
+        raise ValueError(
+            f"Missing or invalid {dir_var} environment variable. "
+            f"Please set it to a valid directory path in your .env file."
+        )
+    
+    schema = os.environ.get(schema_var)
+    if not schema or schema.strip() == "":
+        raise ValueError(
+            f"Missing {schema_var} environment variable. "
+            f"Please set it in your .env file."
+        )
+    
+    return data_dir, schema
+
+
+def get_fhir_cache_folder() -> str:
+    """Get FHIR cache folder for backward compatibility.
+    
+    Returns:
+        FHIR_API_CACHE_FOLDER value
+    
+    Raises:
+        ValueError: If not set
+    """
+    folder = os.environ.get("FHIR_API_CACHE_FOLDER")
+    if not folder or folder.strip() == "":
+        raise ValueError(
+            "Missing FHIR_API_CACHE_FOLDER environment variable. "
+            "For new multi-source setup, use get_data_source_config() instead."
+        )
+    return folder
