@@ -60,6 +60,11 @@ def get_fhir_basic_auth() -> tuple[str, str] | None:
     Returns:
       (username, password) if both are present, otherwise None.
 
+    Notes:
+      This return value is intentionally shaped to be passed directly to
+      `httpx.Client(auth=...)`, which will generate an `Authorization: Basic ...`
+      header for each request.
+
     Raises:
       ValueError if only one of username/password is set.
     """
