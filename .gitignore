@@ -218,3 +218,12 @@ __marimo__/
 
 log/
 sql/
+
+# Evidence reports build artifacts
+evidence/node_modules/
+evidence/build/
+evidence/.svelte-kit/
+evidence/.evidence/template/
+evidence/.evidence/meta/
+evidence/static/data/
+evidence/*.options.yaml

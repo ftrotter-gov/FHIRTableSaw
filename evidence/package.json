@@ -1,0 +1,29 @@
+{
+  "name": "fhirtablesaw-evidence-reports",
+  "version": "0.1.0",
+  "description": "Evidence reporting dashboard for FHIRTableSaw - connects to PostgreSQL and DuckDB data sources",
+  "scripts": {
+    "dev": "evidence dev --host 0.0.0.0 --port 3000",
+    "build": "evidence build",
+    "build:strict": "evidence build:strict",
+    "sources": "evidence sources",
+    "sources:strict": "evidence sources --strict",
+    "preview": "evidence preview",
+    "test": "evidence build"
+  },
+  "engines": {
+    "npm": ">=7.0.0",
+    "node": ">=18.0.0"
+  },
+  "type": "module",
+  "dependencies": {
+    "@evidence-dev/core-components": "^5.4.2",
+    "@evidence-dev/duckdb": "^2.0.1",
+    "@evidence-dev/evidence": "^40.1.8",
+    "@evidence-dev/postgres": "^1.0.10"
+  },
+  "overrides": {
+    "jsonwebtoken": "9.0.0",
+    "trim@<0.0.3": ">0.0.3"
+  }
+}

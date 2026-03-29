@@ -1,0 +1,87 @@
+# =============================================================================
+# Docker Compose for FHIRTableSaw Evidence reports
+# =============================================================================
+#
+# Services:
+#   evidence-dev   - Development server with hot-reload (port 3000)
+#   evidence-build - One-shot static build for GitHub Pages
+#
+# PostgreSQL credentials are read from the project root .env file.
+# DuckDB .db files can be bind-mounted into sources/duckdb_local/.
+#
+# Usage:
+#   docker compose up evidence-dev         # Start dev server
+#   docker compose run evidence-build      # Build static site
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Development server (hot-reload, port 3000)
+  # ---------------------------------------------------------------------------
+  evidence-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    # Using network_mode: host so the container can reach a local PostgreSQL.
+    # The Evidence dev server listens on port 3000.
+    # If your PostgreSQL is remote, you can switch to bridge networking and
+    # uncomment the ports mapping below instead.
+    network_mode: host
+    # ports:
+    #   - "3000:3000"
+    volumes:
+      # Mount the Evidence project source for live editing
+      - ./pages:/app/pages
+      - ./sources:/app/sources
+      - ./evidence.config.yaml:/app/evidence.config.yaml
+      # Mount DuckDB files from the project root (if they exist)
+      # Adjust the host path below to point at your .db files
+      # Example: - ../data/fhirtablesaw.duckdb:/app/sources/duckdb_local/fhirtablesaw.duckdb:ro
+    environment:
+      # PostgreSQL connection credentials for Evidence
+      # These are read from the project's .env file via env_file below,
+      # then mapped to Evidence's expected environment variable names.
+      - EVIDENCE_SOURCE__postgres__host=${EVIDENCE_PG_HOST:-localhost}
+      - EVIDENCE_SOURCE__postgres__port=${EVIDENCE_PG_PORT:-5432}
+      - EVIDENCE_SOURCE__postgres__database=${EVIDENCE_PG_DATABASE:-ndh}
+      - EVIDENCE_SOURCE__postgres__user=${EVIDENCE_PG_USER:-postgres}
+      - EVIDENCE_SOURCE__postgres__password=${EVIDENCE_PG_PASSWORD:-postgres}
+      - EVIDENCE_SOURCE__postgres__ssl=${EVIDENCE_PG_SSL:-false}
+    env_file:
+      # Read the project root .env (will NOT be edited or overwritten)
+      - path: ../.env
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # Static build for GitHub Pages (one-shot container)
+  # ---------------------------------------------------------------------------
+  evidence-build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    network_mode: host
+    volumes:
+      # Export the built static site to the host
+      - ./build:/app/build
+      # Mount sources so the build can read latest queries
+      - ./sources:/app/sources
+    environment:
+      - EVIDENCE_SOURCE__postgres__host=${EVIDENCE_PG_HOST:-localhost}
+      - EVIDENCE_SOURCE__postgres__port=${EVIDENCE_PG_PORT:-5432}
+      - EVIDENCE_SOURCE__postgres__database=${EVIDENCE_PG_DATABASE:-ndh}
+      - EVIDENCE_SOURCE__postgres__user=${EVIDENCE_PG_USER:-postgres}
+      - EVIDENCE_SOURCE__postgres__password=${EVIDENCE_PG_PASSWORD:-postgres}
+      - EVIDENCE_SOURCE__postgres__ssl=${EVIDENCE_PG_SSL:-false}
+      - BASE_PATH=/FHIRTableSaw
+    env_file:
+      - path: ../.env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        npm run sources && \
+        EVIDENCE_BUILD_DIR=./build$${BASE_PATH} npm run build && \
+        echo "=== Static build complete. Output in ./build/ ==="

@@ -1,0 +1,84 @@
+# =============================================================================
+# GitHub Actions: Deploy Evidence reports to GitHub Pages
+# =============================================================================
+#
+# This workflow builds the Evidence static site and deploys it to GitHub Pages.
+#
+# Prerequisites:
+#   1. Enable GitHub Pages in repo Settings > Pages > Source: GitHub Actions
+#   2. Add the following secrets in Settings > Secrets > Actions:
+#      - EVIDENCE_SOURCE__postgres__host
+#      - EVIDENCE_SOURCE__postgres__port
+#      - EVIDENCE_SOURCE__postgres__database
+#      - EVIDENCE_SOURCE__postgres__user
+#      - EVIDENCE_SOURCE__postgres__password
+#      - EVIDENCE_SOURCE__postgres__ssl  (optional, defaults to "false")
+#
+# The workflow triggers on pushes to main and can also be run on a schedule.
+# =============================================================================
+
+name: Deploy Evidence Reports to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'evidence/**'
+      - '.github/workflows/evidence-gh-pages.yml'
+  workflow_dispatch: {}
+  # Uncomment below for scheduled rebuilds (e.g., daily at 6 AM UTC):
+  # schedule:
+  #   - cron: '0 6 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: evidence
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: evidence/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Extract sources and build static site
+        env:
+          BASE_PATH: '/${{ github.event.repository.name }}'
+          EVIDENCE_SOURCE__postgres__host: ${{ secrets.EVIDENCE_SOURCE__postgres__host }}
+          EVIDENCE_SOURCE__postgres__port: ${{ secrets.EVIDENCE_SOURCE__postgres__port }}
+          EVIDENCE_SOURCE__postgres__database: ${{ secrets.EVIDENCE_SOURCE__postgres__database }}
+          EVIDENCE_SOURCE__postgres__user: ${{ secrets.EVIDENCE_SOURCE__postgres__user }}
+          EVIDENCE_SOURCE__postgres__password: ${{ secrets.EVIDENCE_SOURCE__postgres__password }}
+          EVIDENCE_SOURCE__postgres__ssl: ${{ secrets.EVIDENCE_SOURCE__postgres__ssl || 'false' }}
+        run: |
+          npm run sources
+          EVIDENCE_BUILD_DIR=./build/${{ github.event.repository.name }} npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: evidence/build/${{ github.event.repository.name }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
