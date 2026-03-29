@@ -22,6 +22,7 @@ from fhir_tablesaw_3tier.fhir.constants import (
     US_NPI_SYSTEM,
 )
 from fhir_tablesaw_3tier.fhir.r4_models import PractitionerResource
+from fhir_tablesaw_3tier.env import get_fhir_basic_auth
 
 
 def _warn(msg: str) -> None:
@@ -57,7 +58,7 @@ def practitioner_from_fhir_json(
     Notes:
     - Uses local minimal models built on top of **fhir-core**.
     - Handles selective flattening and warnings for dropped repeats.
-    - Supports reference resolution via unauthenticated GET if a server URL is provided.
+    - Supports reference resolution via optional Basic Auth GET if a server URL is provided.
     """
 
     report = DroppedRepeatsReport()
@@ -184,7 +185,12 @@ def practitioner_from_fhir_json(
     # Resolve endpoints if server URL provided (store just uuid for now)
     if fhir_server_url:
         # try to resolve and validate existence
-        with httpx.Client(base_url=fhir_server_url, timeout=10.0) as client:
+        with httpx.Client(
+            base_url=fhir_server_url,
+            timeout=10.0,
+            auth=get_fhir_basic_auth(),
+            headers={"Accept": "application/fhir+json"},
+        ) as client:
             for e in endpoint_refs:
                 try:
                     r = client.get(f"Endpoint/{e.resource_uuid}")

@@ -1,5 +1,5 @@
 
-This repo now includes a **simple ingestion (“slurp”) pipeline** that can pull data from an **unauthenticated NDH-style FHIR R4 server** and write it into a relational database using the 3-tier architecture.
+This repo now includes a **simple ingestion (“slurp”) pipeline** that can pull data from an **NDH-style FHIR R4 server** and write it into a relational database using the 3-tier architecture.
 
 The ingestion path is:
 
@@ -93,6 +93,11 @@ cp env.example .env
 At minimum you must set:
 
 - `DATABASE_URL`
+
+If your FHIR server requires **Basic Auth**, also set:
+
+- `FHIR_API_USERNAME`
+- `FHIR_API_PASSWORD`
 
 Optional:
 

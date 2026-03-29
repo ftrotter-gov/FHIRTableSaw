@@ -4,7 +4,7 @@ This module provides a simple ingestion routine:
 
 FHIR Server -> (Bundle paging) -> parse into canonical models -> persist into DB.
 
-Assumes unauthenticated server.
+Supports optional Basic Auth via environment variables.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from fhir_tablesaw_3tier.fhir.organization_affiliation import organization_affil
 from fhir_tablesaw_3tier.fhir.organization_clinical import clinical_organization_from_fhir_json
 from fhir_tablesaw_3tier.fhir.practitioner import practitioner_from_fhir_json
 from fhir_tablesaw_3tier.fhir.practitioner_role import practitioner_role_from_fhir_json
-from fhir_tablesaw_3tier.env import load_dotenv, require_env
+from fhir_tablesaw_3tier.env import get_fhir_basic_auth, load_dotenv, require_env
 from fhir_tablesaw_3tier.db.engine import create_engine_with_schema
 
 
@@ -343,6 +343,7 @@ def slurp_to_postgres(
         timeout=30.0,
         http2=http2,
         headers={"Accept": "application/fhir+json"},
+        auth=get_fhir_basic_auth(),
     ) as client:
         with Session(engine) as session:
             print(f"Starting slurp from {fhir_server_url} into schema {schema}")
