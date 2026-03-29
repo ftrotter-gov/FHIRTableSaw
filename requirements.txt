@@ -1,0 +1,22 @@
+# FHIRTableSaw Dependencies
+# This file lists all required dependencies for the project.
+# Install with: pip install -r requirements.txt
+
+# Core dependencies (from pyproject.toml)
+httpx>=0.27.0
+PyYAML>=6.0.1
+SQLAlchemy>=2.0.30
+pydantic>=2.7.0
+fhir-core>=1.1.3
+psycopg[binary]>=3.2.0
+fhir4ds>=0.1.0
+great-expectations>=0.18.0
+pandas>=2.0.0
+
+# Additional dependencies used in the codebase
+duckdb>=0.9.0
+python-dotenv>=1.0.0
+
+# Development dependencies (optional)
+pytest>=8.0.0
+ruff>=0.6.0

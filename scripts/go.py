@@ -28,7 +28,19 @@ import sys
 from pathlib import Path
 
 # Add src to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+repo_root = Path(__file__).parent.parent
+sys.path.insert(0, str(repo_root / "src"))
+# Add repo root for check_dependencies
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+# Check dependencies before importing project modules
+try:
+    from check_dependencies import require_dependencies  # noqa: E402
+    require_dependencies()
+except ImportError:
+    print("ERROR: check_dependencies.py not found. Please ensure it exists in the repo root.", file=sys.stderr)
+    sys.exit(1)
 
 from fhir_tablesaw_3tier.env import load_dotenv
 from fhir_tablesaw_3tier.fhir4ds_integration import (

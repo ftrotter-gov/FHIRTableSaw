@@ -54,6 +54,14 @@ def _ensure_src_on_path() -> None:
 
 _ensure_src_on_path()
 
+# Check dependencies before importing project modules
+try:
+    from check_dependencies import require_dependencies  # noqa: E402
+    require_dependencies()
+except ImportError:
+    print("ERROR: check_dependencies.py not found. Please ensure it exists in the repo root.", file=sys.stderr)
+    sys.exit(1)
+
 from fhir_tablesaw_3tier.env import load_dotenv  # noqa: E402
 
 
