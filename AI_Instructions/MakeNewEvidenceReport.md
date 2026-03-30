@@ -1,449 +1,703 @@
-Make a new evidence report
-===================
+# Make a New Evidence Report
 
-* Construct the SQL as per the instructions and put them as a new file in evidence/sources/postgres
-* Then make a new evidence page in evidence/pages
-* Then add the new page to the report index page evidence/pages/index.md
+Complete guide for creating Evidence.dev reports in the FHIRTableSaw project.
 
-## How to write the SQL files
+## Overview
 
-Got it — just static source SQL files, no DuckDB, no display layer, no query files.
+Evidence reports follow an **Index of Indexes** pattern:
 
-Here is the tight, one-page advanced cheat sheet for sources/<source_name>/*.sql only.
+- **Main Index** (`evidence/pages/index.md`) - Lists all report sections
+- **Section Indexes** (`evidence/pages/{section}/index.md`) - Lists reports in each section
+- **Report Pages** (`evidence/pages/{section}/{report_name}.md`) - Individual reports
 
-⸻
+## Quick Start Checklist
 
-Evidence.dev — Source SQL Files (Advanced Cheat Sheet)
+1. Create SQL source file in `evidence/sources/postgres/`
+2. Create report page in `evidence/pages/{section}/`
+3. Update section index at `evidence/pages/{section}/index.md`
+4. Update main index at `evidence/pages/index.md` (if new section)
 
-Core model (what these files actually are)
-	•	Each .sql file is a single SELECT statement
-	•	Runs directly on your source database (Postgres, Databricks, Snowflake, etc.)
-	•	Result is materialized as a table
-	•	Table name = <source_name>.<file_name>
+---
 
-sources/claims/top_providers.sql
-→ claims.top_providers
+## Naming Conventions
 
+### SQL Source Files
 
-⸻
+**Location:** `evidence/sources/postgres/`
 
-1. You can use full native SQL (this is the main “power”)
+**Naming Pattern:** `{section}_{report_name}.sql`
 
-These files support everything your database supports, including:
-	•	CTEs (WITH)
-	•	window functions
-	•	temp subqueries
-	•	joins across schemas
-	•	vendor-specific syntax (Spark SQL, Postgres JSON ops, etc.)
-	•	analytic functions
-	•	lateral joins (if supported)
-	•	recursive queries
+**Examples:**
+- `endpoint_summary_stats.sql`
+- `endpoint_address_distribution.sql`
+- `practitioner_credential_coverage.sql`
+- `location_geographic_analysis.sql`
 
-Example:
+**Rules:**
+- Use lowercase with underscores
+- First part = section name
+- Second part = descriptive report name
+- Must end with `.sql`
 
-with ranked as (
-    select
-        npi,
-        taxonomy_code,
-        count(*) as claim_count,
-        dense_rank() over (
-            partition by taxonomy_code
-            order by count(*) desc
-        ) as rnk
-    from claims
-    group by 1, 2
-)
-select *
-from ranked
-where rnk <= 10
+### Page Files
 
-👉 There is no Evidence-specific limitation here — this is just your DB.
+**Location:** `evidence/pages/{section}/`
 
-⸻
+**Naming Pattern:** `{report_name}.md`
 
-2. Deterministic output matters (implicit constraint)
+**Examples:**
+- `evidence/pages/endpoint/summary_stats.md`
+- `evidence/pages/endpoint/address_distribution.md`
+- `evidence/pages/practitioner/credential_coverage.md`
+- `evidence/pages/location/geographic_analysis.md`
 
-Because results are materialized:
-	•	Always define stable column names
-	•	Avoid nondeterministic constructs unless intentional
+**Rules:**
+- Folder name = section name (lowercase, underscores)
+- File name = report name only (lowercase, underscores)
+- Must end with `.md`
 
-Bad:
+### Query Names (in Page Files)
 
-select now() as run_time
+**Pattern:** `{report_name}_data`
 
-Good:
-
-select *, current_date as snapshot_date
-
-Reason: these outputs become persistent datasets.
-
-⸻
-
-3. Ordering affects storage efficiency (subtle but real)
-
-Docs note that ordering improves compression/performance.
-
-order by state, city, provider_name
-
-This matters because output is stored (typically as Parquet under the hood).
-
-⸻
-
-4. Pre-aggregation is a first-class pattern
-
-Unlike query-layer SQL, this is where you should collapse data early.
-
-Example:
-
-select
-    service_year,
-    taxonomy_code,
-    count(*) as claim_count,
-    sum(allowed_amount) as total_allowed
-from claims
-group by 1, 2
-
-Why:
-	•	reduces storage
-	•	speeds downstream queries
-	•	avoids repeated heavy scans
-
-⸻
-
-5. Column shaping is permanent (treat like schema design)
-
-This is effectively your data modeling layer.
-
-Do it once here:
-
-select
-    npi,
-    upper(trim(provider_name)) as provider_name,
-    taxonomy_code,
-    coalesce(primary_specialty, 'UNKNOWN') as specialty,
-    city,
-    state
-from raw.providers
-
-Key idea:
-	•	rename ugly fields here
-	•	normalize formats here
-	•	downstream SQL should not fix this again
-
-⸻
-
-6. File-level isolation (no cross-file references)
-
-Critical limitation:
-	•	Source SQL files cannot reference each other
-
-❌ Not allowed:
-
-select * from ${other_source_query}
-
-Each file is:
-	•	independent
-	•	standalone
-	•	executed directly against DB
-
-If you need reuse → use views in the database, not Evidence.
-
-⸻
-
-7. Multi-stage logic must be inside one file
-
-Since files don’t chain, you must embed complexity using:
-	•	CTE pipelines
-	•	nested subqueries
-
-Pattern:
-
-with base as (
-    select * from claims where allowed_amount > 0
-),
-grouped as (
-    select
-        npi,
-        sum(allowed_amount) as total
-    from base
-    group by 1
-)
-select *
-from grouped
-where total > 100000
-
-
-⸻
-
-8. You can join anything your DB can access
-
-Including:
-	•	multiple schemas
-	•	cross-database links (if DB supports)
-	•	external tables (S3, etc.)
-	•	views and materialized views
-
-Example:
-
-select
-    p.npi,
-    p.provider_name,
-    c.claim_count
-from providers p
-join claims_summary c
-    on p.npi = c.npi
-
-
-⸻
-
-9. No parameterization inside source SQL
-
-Unlike query files:
-
-❌ Not supported:
-
-where state = '${params.state}'
-
-These files are:
-	•	static
-	•	deterministic
-	•	environment-independent
-
-If you need dynamic filtering → not done here.
-
-⸻
-
-10. One query = one output table (no multiple statements)
-
-You cannot:
-	•	define multiple outputs
-	•	run DDL
-	•	create temp tables outside the query
-
-❌ Not allowed:
-
-create temp table x as ...
-select * from x
-
-Instead:
-
-✔ use CTEs:
-
-with x as (...)
-select * from x
-
-
-⸻
-
-11. Avoid non-portable side effects
-
-Because these are extraction queries:
-	•	no INSERT, UPDATE, DELETE
-	•	no transaction control
-	•	no session state assumptions
-
-Think:
-
-👉 “pure SELECT → dataset”
-
-⸻
-
-12. Performance strategy (what actually matters)
-
-Best-performing source SQL files:
-	•	filter early
-	•	project minimal columns
-	•	aggregate early
-	•	avoid wide joins unless necessary
-	•	sort output (for storage efficiency)
-
-⸻
-
-13. Practical mental model
-
-Treat each file as:
-
-A materialized, versionable, production-grade table definition written in raw SQL
-
-Not:
-	•	an ad hoc query
-	•	not a view layer
-	•	not a dashboard query
-
-⸻
-
-Minimal “gold standard” template
-
-with base as (
-    select
-        npi,
-        taxonomy_code,
-        allowed_amount,
-        service_date
-    from raw.claims
-    where allowed_amount > 0
-),
-aggregated as (
-    select
-        date_trunc('year', service_date) as service_year,
-        taxonomy_code,
-        count(*) as claim_count,
-        sum(allowed_amount) as total_allowed
-    from base
-    group by 1, 2
-)
-select *
-from aggregated
-order by service_year, taxonomy_code
-
-## How to make reports
-
-The user will tell you which charts to make, but you should almost always have a Big Value chart for results will less than 3 rows.
-Data Table for all tables, and then a specific additional chart if the user asks for it.
-
-Perfect — here’s the barebones pattern library you actually want.
-
-No fluff. Just copy/paste patterns.
-
-⸻
-
-1. Data Table (from a table)
-
-```sql my_data
-select *
-from claims.top_providers
-limit 100
-
-<DataTable data={my_data}/>
+**Examples:**
+```sql summary_stats_data
+SELECT * FROM postgres.endpoint_summary_stats
 ```
 
-
-	•	Shows full table by default  ￼
-
-Optional (clean columns):
-
-<DataTable data={my_data}>
-  <Column id=npi/>
-  <Column id=provider_name/>
-  <Column id=claim_count fmt=num0/>
-</DataTable>
-
-
-⸻
-
-2. Big Value (summary number)
-
-```sql summary
-select
-    sum(claim_count) as total_claims
-from claims.top_providers
-
-<BigValue data={summary} column=total_claims/>
+```sql address_distribution_data
+SELECT * FROM postgres.endpoint_address_distribution
 ```
 
+**Rules:**
+- Match the report file name
+- Add `_data` suffix for clarity
+- Use in SQL code blocks and component references
 
-or inline:
+### Table References
 
-Total claims: <Value data={summary} column=total_claims/>
+**Pattern:** `{source_name}.{sql_filename_without_extension}`
 
-	•	<Value> pulls a single column value from query  ￼
+**Examples:**
+- `postgres.endpoint_summary_stats` → refers to `endpoint_summary_stats.sql`
+- `postgres.practitioner_credential_coverage` → refers to `practitioner_credential_coverage.sql`
 
-⸻
-
-3. Line Chart (single series)
-
-```sql monthly
-select
-    service_month,
-    claim_count
-from claims.monthly_claims
-order by service_month
-
----
-
-# 4. Line Chart (multiple series)
-
-```md
-```sql monthly_by_type
-select
-    service_month,
-    taxonomy_code,
-    claim_count
-from claims.monthly_taxonomy
-
-* `series=` splits into multiple lines  [oai_citation:2‡Evidence Docs](https://docs.evidence.dev/components/charts/line-chart?utm_source=chatgpt.com)
+**Key Points:**
+- `postgres` = source name (defined in `evidence/sources/postgres/connection.yaml`)
+- SQL filename (minus `.sql`) becomes the table name
+- Evidence automatically materializes these as queryable tables
 
 ---
 
-# 5. Vertical Bar Chart
+## SQL Source File Structure
 
-```md
-```sql top_states
-select
-    state,
-    provider_count
-from claims.provider_counts_by_state
-order by provider_count desc
-limit 10
+### Required Comment Header
 
-* Same pattern as line chart — just swap component  [oai_citation:3‡Evidence Docs](https://docs.evidence.dev/core-concepts/components?utm_source=chatgpt.com)
+Every SQL file must start with a standard comment block:
+
+```sql
+-- Section: {section_name}
+-- Report: {report_name}
+-- Description: {Brief description of what this query returns}
+-- Returns: {Number of rows} row(s) with {column count} columns: {column names}
+```
+
+**Example:**
+
+```sql
+-- Section: endpoint
+-- Report: summary_stats
+-- Description: Summary statistics for the endpoint table
+-- Returns: 1 row with 3 columns: uuid_count, address_count, row_count
+
+SELECT
+    COUNT(DISTINCT(resource_uuid)) AS uuid_count,
+    COUNT(DISTINCT(address)) AS address_count,
+    COUNT(*) AS row_count
+FROM fhirtablesaw.endpoint
+ORDER BY row_count
+```
+
+### SQL Best Practices
+
+**Core Rules:**
+- Each file contains ONE SELECT statement
+- No DDL (CREATE, ALTER, DROP)
+- No DML (INSERT, UPDATE, DELETE)
+- Pure SELECT queries only
+- Output is automatically materialized as a table
+
+**Database Schema:**
+- Use `fhirtablesaw` schema: `FROM fhirtablesaw.{table_name}`
+- For FHIR resources: `fhirtablesaw.endpoint`, `fhirtablesaw.practitioner`, etc.
+
+**Advanced SQL Features Supported:**
+- CTEs (WITH clauses)
+- Window functions
+- Joins (including complex multi-table joins)
+- Subqueries
+- Aggregate functions
+- PostgreSQL-specific functions
+
+**Performance Tips:**
+- Filter early in CTEs
+- Project only needed columns
+- Aggregate before joining when possible
+- Add ORDER BY for better compression
+- Avoid SELECT * unless truly needed
+
+### SQL Template
+
+```sql
+-- Section: {section}
+-- Report: {report_name}
+-- Description: {what this does}
+-- Returns: {row/column description}
+
+WITH base AS (
+    SELECT
+        column1,
+        column2,
+        column3
+    FROM fhirtablesaw.{table_name}
+    WHERE {filter_conditions}
+),
+aggregated AS (
+    SELECT
+        column1,
+        COUNT(*) AS count_col,
+        SUM(column2) AS sum_col
+    FROM base
+    GROUP BY column1
+)
+SELECT *
+FROM aggregated
+ORDER BY count_col DESC
+```
 
 ---
 
-# 6. Scatter Plot
+## Report Page Structure
 
-```md
-```sql scatter_data
-select
-    provider_count,
-    total_allowed
-from claims.state_summary
+### Page Template
 
+```markdown
+---
+title: {Report Title}
 ---
 
-# 7. Core pattern (this is the only thing to remember)
+# {Report Title}
 
-Every component follows this shape:
+{Brief description of what this report shows}
 
-```md
-<Component
-    data={query_name}
-    x=column
-    y=column
-    series=optional
+```sql {report_name}_data
+SELECT *
+FROM postgres.{section}_{report_name}
+```
+
+<Details title="Show SQL Source">
+
+\`\`\`sql
+-- Section: {section}
+-- Report: {report_name}
+-- Description: {description}
+-- Returns: {return description}
+
+{Paste the complete SQL from the source file here}
+\`\`\`
+
+</Details>
+
+## Summary Metrics
+
+<BigValue
+    data={{report_name}_data}
+    value=metric_column_1
+    title="Metric 1 Title"
 />
 
-Rules:
-	•	data = query name
-	•	x = first axis
-	•	y = metric(s)
-	•	series = grouping (optional)
+<BigValue
+    data={{report_name}_data}
+    value=metric_column_2
+    title="Metric 2 Title"
+/>
 
-Evidence auto-fills defaults if you omit some fields  ￼
+## Detailed Data
 
-⸻
+<DataTable data={{report_name}_data} />
 
-8. Where to find everything else
+## Additional Visualizations
 
-Use this page (your link):
+{Add charts as needed - see Component Reference below}
+```
 
-👉 All Evidence Components￼
+### Real Example
 
-It includes:
-	•	area charts
-	•	stacked bars
-	•	bubble charts
-	•	sankey
-	•	heatmaps
-	•	funnel charts
+```markdown
+---
+title: Endpoint Summary Statistics
+---
 
-⸻
+# Endpoint Summary Statistics
 
-Mental model (keep this)
-	•	SQL builds the dataset
-	•	Component = just a thin visualization layer
-	•	Every chart = data + x + y (+ series)
+Overview of endpoint data quality and volume metrics.
 
-⸻
+```sql summary_stats_data
+SELECT *
+FROM postgres.endpoint_summary_stats
+```
 
-If you want next step, I can give you a “which chart to use when” cheat sheet tuned for healthcare / claims data.
+<Details title="Show SQL Source">
+
+\`\`\`sql
+-- Section: endpoint
+-- Report: summary_stats
+-- Description: Summary statistics for the endpoint table
+-- Returns: 1 row with 3 columns: uuid_count, address_count, row_count
+
+SELECT
+    COUNT(DISTINCT(resource_uuid)) AS uuid_count,
+    COUNT(DISTINCT(address)) AS address_count,
+    COUNT(*) AS row_count
+FROM fhirtablesaw.endpoint
+ORDER BY row_count
+\`\`\`
+
+</Details>
+
+## Summary Metrics
+
+<BigValue
+    data={summary_stats_data}
+    value=uuid_count
+    title="Distinct UUIDs"
+/>
+
+<BigValue
+    data={summary_stats_data}
+    value=address_count
+    title="Distinct Addresses"
+/>
+
+<BigValue
+    data={summary_stats_data}
+    value=row_count
+    title="Total Rows"
+/>
+
+## Detailed Data
+
+<DataTable data={summary_stats_data} />
+```
+
+---
+
+## Component Reference
+
+### DataTable (Always Include)
+
+Display full tabular data with sorting and filtering.
+
+**Basic Usage:**
+
+```markdown
+<DataTable data={query_name} />
+```
+
+**With Custom Columns:**
+
+```markdown
+<DataTable data={query_name}>
+  <Column id=column1 />
+  <Column id=column2 title="Custom Title" />
+  <Column id=count_col fmt=num0 />
+  <Column id=percent_col fmt=pct1 />
+</DataTable>
+```
+
+**Format Options:**
+- `num0` - Integer (no decimals)
+- `num1` - One decimal place
+- `num2` - Two decimal places
+- `pct0` - Percentage, no decimals
+- `pct1` - Percentage, one decimal
+- `usd` - US Dollar format
+
+### BigValue (For Key Metrics)
+
+Display standalone metric cards on dashboards.
+
+**Usage:**
+
+```markdown
+<BigValue
+    data={query_name}
+    value=column_name
+    title="Display Title"
+/>
+```
+
+**When to Use:**
+- Dashboard summary cards
+- Key performance indicators
+- Standalone metrics at top of page
+
+### Value (For Inline Metrics)
+
+Insert metric values within text paragraphs.
+
+**Usage:**
+
+```markdown
+The total count is <Value data={query_name} column=count_col />.
+```
+
+**When to Use:**
+- Inline text references
+- Narrative reports
+- Contextual metrics within paragraphs
+
+### LineChart
+
+Display trends over time or continuous data.
+
+**Basic Usage:**
+
+```markdown
+```sql monthly_data
+SELECT
+    service_month,
+    claim_count
+FROM postgres.claims_monthly
+ORDER BY service_month
+```
+
+<LineChart
+    data={monthly_data}
+    x=service_month
+    y=claim_count
+/>
+```
+
+**Multiple Series:**
+
+```markdown
+```sql monthly_by_type
+SELECT
+    service_month,
+    taxonomy_code,
+    claim_count
+FROM postgres.claims_monthly_by_type
+ORDER BY service_month
+```
+
+<LineChart
+    data={monthly_by_type}
+    x=service_month
+    y=claim_count
+    series=taxonomy_code
+/>
+```
+
+### BarChart
+
+Display comparisons across categories.
+
+**Basic Usage:**
+
+```markdown
+```sql top_states
+SELECT
+    state,
+    provider_count
+FROM postgres.provider_counts_by_state
+ORDER BY provider_count DESC
+LIMIT 10
+```
+
+<BarChart
+    data={top_states}
+    x=state
+    y=provider_count
+/>
+```
+
+**Multiple Series (Grouped Bars):**
+
+```markdown
+<BarChart
+    data={category_data}
+    x=category
+    y=value
+    series=type
+/>
+```
+
+### ScatterPlot
+
+Show relationships between two numeric variables.
+
+**Usage:**
+
+```markdown
+```sql scatter_data
+SELECT
+    provider_count,
+    total_allowed,
+    state
+FROM postgres.state_summary
+```
+
+<ScatterPlot
+    data={scatter_data}
+    x=provider_count
+    y=total_allowed
+    series=state
+/>
+```
+
+### Details (Show/Hide SQL)
+
+Collapsible section for SQL source code display.
+
+**Usage:**
+
+```markdown
+<Details title="Show SQL Source">
+
+\`\`\`sql
+-- Your SQL query here
+SELECT * FROM fhirtablesaw.example
+\`\`\`
+
+</Details>
+```
+
+**Standard Pattern:**
+- Always include on report pages
+- Title should be "Show SQL Source"
+- Include the complete SQL with comments
+- Use triple backticks with `sql` language marker
+
+---
+
+## Section Index Structure
+
+Each section needs an index page listing its reports.
+
+**Location:** `evidence/pages/{section}/index.md`
+
+**Template:**
+
+```markdown
+---
+title: {Section Name} Reports
+---
+
+# {Section Name} Reports
+
+{Brief description of this section}
+
+## Available Reports
+
+- [Report 1 Title](./{report_name_1}) - Brief description
+- [Report 2 Title](./{report_name_2}) - Brief description
+- [Report 3 Title](./{report_name_3}) - Brief description
+
+---
+
+[← Back to Main Index](../)
+```
+
+**Example:**
+
+```markdown
+---
+title: Endpoint Reports
+---
+
+# Endpoint Reports
+
+Data quality and analysis reports for FHIR Endpoint resources.
+
+## Available Reports
+
+- [Summary Statistics](./summary_stats) - Overview of endpoint data volume and quality
+- [Address Distribution](./address_distribution) - Geographic distribution of endpoint addresses
+- [Connection Type Analysis](./connection_types) - Breakdown of endpoint connection types
+
+---
+
+[← Back to Main Index](../)
+```
+
+---
+
+## Main Index Structure
+
+The main index lists all report sections.
+
+**Location:** `evidence/pages/index.md`
+
+**Template:**
+
+```markdown
+---
+title: FHIRTableSaw Reports
+---
+
+# FHIRTableSaw Data Reports
+
+Comprehensive data quality and analysis reports for FHIRTableSaw project.
+
+Data is sourced from PostgreSQL (primary relational store) and optionally from local DuckDB files.
+
+## Report Sections
+
+### [{Section 1 Name}](./{section_1}/)
+
+{Brief description of section 1}
+
+### [{Section 2 Name}](./{section_2}/)
+
+{Brief description of section 2}
+
+### [{Section 3 Name}](./{section_3}/)
+
+{Brief description of section 3}
+
+---
+
+## About This Dashboard
+
+- **PostgreSQL source**: Connects to the FHIRTableSaw PostgreSQL database
+- **DuckDB source**: Available for local DuckDB `.db` files when mounted
+- **Deployment**: Static pages published to GitHub Pages
+
+See [EVIDENCE_REPORTS.md](https://github.com/ftrotter-gov/FHIRTableSaw/blob/main/docs/EVIDENCE_REPORTS.md)
+for setup and usage instructions.
+```
+
+---
+
+## Step-by-Step Workflow
+
+### Creating a New Report in Existing Section
+
+1. **Create SQL file**
+   - Location: `evidence/sources/postgres/{section}_{report_name}.sql`
+   - Add standard comment header
+   - Write SELECT query
+
+2. **Create page file**
+   - Location: `evidence/pages/{section}/{report_name}.md`
+   - Use page template
+   - Add query referencing `postgres.{section}_{report_name}`
+   - Include Details block with SQL source
+
+3. **Update section index**
+   - Edit `evidence/pages/{section}/index.md`
+   - Add link to new report
+
+4. **Test**
+   - Run `npm run dev` in evidence directory
+   - Verify report displays correctly
+
+### Creating a New Section
+
+1. **Create section directory**
+   - Create `evidence/pages/{section}/`
+
+2. **Create section index**
+   - Create `evidence/pages/{section}/index.md`
+   - Use section index template
+
+3. **Create first report** (follow steps above)
+
+4. **Update main index**
+   - Edit `evidence/pages/index.md`
+   - Add section link and description
+
+---
+
+## Common Patterns
+
+### Summary Report (1 Row)
+
+Use BigValue components for metrics:
+
+```markdown
+<BigValue data={query_name} value=metric1 title="Metric 1" />
+<BigValue data={query_name} value=metric2 title="Metric 2" />
+```
+
+### Distribution Report (Multiple Rows)
+
+Use DataTable + BarChart:
+
+```markdown
+<DataTable data={query_name} />
+
+<BarChart data={query_name} x=category y=count />
+```
+
+### Time Series Report
+
+Use LineChart:
+
+```markdown
+<LineChart data={query_name} x=date y=value />
+```
+
+### Comparison Report (Multiple Series)
+
+Use grouped BarChart or multi-series LineChart:
+
+```markdown
+<BarChart data={query_name} x=category y=value series=type />
+```
+
+---
+
+## Troubleshooting
+
+### Query Returns No Data
+
+- Check SQL file has valid SELECT
+- Verify table name in `FROM postgres.{section}_{report_name}`
+- Ensure SQL file is in `evidence/sources/postgres/`
+
+### Chart Not Displaying
+
+- Verify data reference matches query name
+- Check column names match SQL output
+- Ensure data has rows (charts need data to render)
+
+### SQL Source Not Showing
+
+- Verify Details component syntax
+- Check triple backticks are properly escaped
+- Ensure SQL is inside Details block
+
+---
+
+## Quick Reference Card
+
+| Element | Pattern |
+|---------|---------|
+| **SQL File** | `evidence/sources/postgres/{section}_{report}.sql` |
+| **Page File** | `evidence/pages/{section}/{report}.md` |
+| **Section Index** | `evidence/pages/{section}/index.md` |
+| **Query Name** | `{report}_data` |
+| **Table Reference** | `postgres.{section}_{report}` |
+| **SQL Comment** | `-- Section: / Report: / Description: / Returns:` |
+| **Show SQL** | `<Details title="Show SQL Source">` |
+
+---
+
+## Additional Resources
+
+- [Evidence.dev Documentation](https://docs.evidence.dev/)
+- [Evidence Components Reference](https://docs.evidence.dev/components/all-components)
+- [SQL Styling Guide](https://docs.evidence.dev/core-concepts/syntax)
+- [FHIRTableSaw Evidence Reports](../docs/EVIDENCE_REPORTS.md)
