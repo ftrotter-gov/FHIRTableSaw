@@ -18,6 +18,25 @@ echo ""
 echo "Step 2: Building static site..."
 npm run build
 
+# Ensure static_site_content directory exists
+if [ ! -d "static_site_content" ]; then
+    echo "Creating static_site_content directory..."
+    mkdir -p static_site_content
+    
+    # Check if Evidence built to build/ directory instead
+    if [ -d "build/FHIRTableSaw" ]; then
+        echo "Copying from build directory..."
+        cp -r build/FHIRTableSaw/* static_site_content/
+    fi
+fi
+
+# Verify the directory has content
+if [ ! -f "static_site_content/index.html" ]; then
+    echo "❌ Error: Static site build failed or incomplete"
+    echo "   No index.html found in static_site_content/"
+    exit 1
+fi
+
 echo ""
 echo "Step 3: Starting local server..."
 echo ""
