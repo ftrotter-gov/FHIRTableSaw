@@ -14,6 +14,10 @@ Data is sourced from PostgreSQL (primary relational store) and optionally from l
 
 Data quality and analysis reports for FHIR Endpoint resources.
 
+### [NPPES Taxonomy Analysis](./nppes_taxonomy_analysis/)
+
+Statistical analysis of healthcare provider taxonomies from the National Plan and Provider Enumeration System (NPPES) database.
+
 ---
 
 ## About This Dashboard
