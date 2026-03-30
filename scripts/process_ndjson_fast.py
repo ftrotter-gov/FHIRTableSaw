@@ -204,7 +204,12 @@ def main() -> None:
 
             table_name = args.table or view_name
 
-            uploader = CSVPostgreSQLUploader()
+            # Explicitly pass schema from environment to ensure go_p.py override works
+            import os
+            schema = os.environ.get("DB_SCHEMA", "public")
+            print(f"Using DB_SCHEMA: {schema}")
+            
+            uploader = CSVPostgreSQLUploader(schema=schema)
             upload_result = uploader.upload_csv(
                 csv_path=csv_path,
                 table_name=table_name,

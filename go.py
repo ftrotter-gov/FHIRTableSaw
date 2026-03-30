@@ -446,22 +446,54 @@ def main(argv: list[str] | None = None) -> int:
             viewdef_name=viewdef_name
         )
         
-        # If CSV exists and we're not uploading, or if everything exists including upload, skip
-        if status["csv"]:
+        # If CSV exists and we're not uploading, skip entirely
+        if status["csv"] and not do_upload:
             csv_size_mb = csv_path.stat().st_size / (1024 * 1024)
             print(f"\n⚠ {rt}: CSV already exists ({csv_size_mb:.1f} MB)")
-            
-            if not do_upload:
-                print(f"   Skipping processing for {rt} (CSV complete, no upload needed)")
-                skipped.append(f"{rt}: CSV exists, no upload needed")
-                continue
-            else:
-                print(f"   CSV exists but will still attempt PostgreSQL upload")
-                # Continue to processing to handle upload
+            print(f"   Skipping processing for {rt} (CSV complete, no upload needed)")
+            skipped.append(f"{rt}: CSV exists, no upload needed")
+            continue
         
+        # If CSV exists and we need to upload, skip stages 1 & 2 and just upload
+        if status["csv"] and do_upload:
+            csv_size_mb = csv_path.stat().st_size / (1024 * 1024)
+            print(f"\n⚠ {rt}: CSV already exists ({csv_size_mb:.1f} MB)")
+            print(f"   Skipping NDJSON→DuckDB→CSV stages, uploading existing CSV to PostgreSQL")
+            
+            # Upload CSV directly using the uploader
+            try:
+                from fhir_tablesaw_3tier.csv_uploader import CSVPostgreSQLUploader
+                
+                table_name = viewdef_name
+                schema = os.environ.get("DB_SCHEMA", "public")
+                
+                print(f"\n{'=' * 70}")
+                print(f"UPLOAD ONLY: {rt}")
+                print(f"{'=' * 70}")
+                print(f"CSV: {csv_path}")
+                print(f"Target: {schema}.{table_name}")
+                print(f"Mode: {process_args.upload_mode}")
+                print(f"{'=' * 70}\n")
+                
+                uploader = CSVPostgreSQLUploader(schema=schema)
+                upload_result = uploader.upload_csv(
+                    csv_path=str(csv_path),
+                    table_name=table_name,
+                    if_exists=process_args.upload_mode,
+                )
+                uploader.close()
+                
+                if upload_result["status"] != "success":
+                    failures.append(f"{rt}: upload failed: {upload_result}")
+                else:
+                    print(f"✓ Successfully uploaded {rt} to {upload_result['full_table_path']}\n")
+            except Exception as ex:  # noqa: BLE001
+                failures.append(f"{rt}: upload failed with exception: {ex}")
+            
+            continue
+        
+        # If we're here, we need to process from NDJSON (CSV doesn't exist or needs regeneration)
         # Remove old artifacts if we're reprocessing
-        # Note: DuckDB will be handled by force_reload flag
-        # We keep CSV if it exists and we're just uploading
         if not status["csv"]:
             try:
                 if duckdb_path.exists():

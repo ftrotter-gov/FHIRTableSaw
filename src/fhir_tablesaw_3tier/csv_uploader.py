@@ -91,6 +91,22 @@ class CSVPostgreSQLUploader:
         df = pd.read_csv(csv_path)
         print(f"✓ Loaded {len(df)} rows from CSV")
 
+        # Fix uint64 columns - PostgreSQL doesn't support unsigned 64-bit integers
+        # Convert uint64 to Int64 (nullable signed int64) or string if values are too large
+        print("Checking for uint64 columns...")
+        uint64_cols = [col for col in df.columns if df[col].dtype == 'uint64']
+        if uint64_cols:
+            print(f"  Found {len(uint64_cols)} uint64 columns: {uint64_cols}")
+            for col in uint64_cols:
+                max_val = df[col].max()
+                # Check if values fit in signed int64 range
+                if pd.notna(max_val) and max_val > 9223372036854775807:  # Max int64
+                    print(f"  Converting {col} to string (values exceed int64 range)")
+                    df[col] = df[col].astype(str)
+                else:
+                    print(f"  Converting {col} to Int64 (nullable signed integer)")
+                    df[col] = df[col].astype('Int64')
+
         if df.empty:
             print("⚠ Warning: CSV file is empty")
             return {
