@@ -42,11 +42,13 @@ DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 # Schema names
+DEFAULT_SCHEMA = os.getenv('DB_SCHEMA')  # The actual schema being used
 TEST_SCHEMA = os.getenv('TEST_FHIR_SCHEMA')
 CMS_SCHEMA = os.getenv('CMS_FHIR_SCHEMA')
 PALANTIR_SCHEMA = os.getenv('PALANTIR_FHIR_SCHEMA')
 
 # Source directories
+DEFAULT_DIR = os.getenv('TEST_FHIR_DIR')  # Using TEST_FHIR_DIR as default
 TEST_DIR = os.getenv('TEST_FHIR_DIR')
 CMS_DIR = os.getenv('CMS_FHIR_DIR')
 PALANTIR_DIR = os.getenv('PALANTIR_FHIR_DIR')
@@ -238,27 +240,39 @@ def main():
         print(f"\n📋 Available schemas in database: {', '.join(all_schemas)}")
         cursor.close()
         
-        # Analyze each schema
-        analyze_schema(
-            conn=conn,
-            schema_name=TEST_SCHEMA,
-            source_dir=TEST_DIR,
-            schema_label="TEST ENVIRONMENT"
-        )
+        # Analyze default schema first (the one actually being used by uploads)
+        if DEFAULT_SCHEMA:
+            analyze_schema(
+                conn=conn,
+                schema_name=DEFAULT_SCHEMA,
+                source_dir=DEFAULT_DIR,
+                schema_label="DEFAULT/ACTIVE SCHEMA (DB_SCHEMA)"
+            )
         
-        analyze_schema(
-            conn=conn,
-            schema_name=CMS_SCHEMA,
-            source_dir=CMS_DIR,
-            schema_label="CMS ENVIRONMENT"
-        )
+        # Analyze each configured schema
+        if TEST_SCHEMA:
+            analyze_schema(
+                conn=conn,
+                schema_name=TEST_SCHEMA,
+                source_dir=TEST_DIR,
+                schema_label="TEST ENVIRONMENT"
+            )
         
-        analyze_schema(
-            conn=conn,
-            schema_name=PALANTIR_SCHEMA,
-            source_dir=PALANTIR_DIR,
-            schema_label="PALANTIR ENVIRONMENT"
-        )
+        if CMS_SCHEMA:
+            analyze_schema(
+                conn=conn,
+                schema_name=CMS_SCHEMA,
+                source_dir=CMS_DIR,
+                schema_label="CMS ENVIRONMENT"
+            )
+        
+        if PALANTIR_SCHEMA:
+            analyze_schema(
+                conn=conn,
+                schema_name=PALANTIR_SCHEMA,
+                source_dir=PALANTIR_DIR,
+                schema_label="PALANTIR ENVIRONMENT"
+            )
         
         # Close connection
         conn.close()
