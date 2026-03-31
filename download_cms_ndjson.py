@@ -6,8 +6,8 @@ This script handles the CMS FHIR API authentication and downloads resources
 to a specified directory. It's meant to be a simple, focused downloader.
 
 Usage:
-    python download_cms_ndjson.py [output_directory]
-    
+    python download_cms_ndjson.py output_directory
+
 Example:
     python download_cms_ndjson.py /Users/ftrotter/internal_npd_fhir_api_ndjson
 """
@@ -46,21 +46,19 @@ def main():
         prog="download_cms_ndjson.py",
         description="Download FHIR resources from CMS API to NDJSON files",
     )
-    
+
     parser.add_argument(
         "output_dir",
-        nargs="?",
-        default=None,
-        help="Output directory for NDJSON files (default: CMS_FHIR_DIR from .env)"
+        help="Output directory for NDJSON files (required)"
     )
-    
+
     parser.add_argument(
         "--count",
         type=int,
         default=1000,
         help="Page size for FHIR API requests (default: 1000)"
     )
-    
+
     parser.add_argument(
         "--limit",
         type=int,
@@ -68,40 +66,32 @@ def main():
         dest="stop_after_this_many",
         help="Stop after downloading this many resources (for testing)"
     )
-    
+
     parser.add_argument(
         "--resource-types",
         default=None,
         help="Comma-separated list of resource types (default: all supported types)"
     )
-    
+
     parser.add_argument(
         "--cms-url",
         default=None,
         help="Override CMS FHIR server URL (default: https://dev.cnpd.internal.cms.gov/fhir/)"
     )
-    
+
     args = parser.parse_args()
-    
+
     # Load environment variables from .env
     load_dotenv(override=True)
-    
+
     # Determine output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
-    else:
-        cms_dir = os.getenv('CMS_FHIR_DIR')
-        if not cms_dir:
-            print("❌ ERROR: No output directory specified and CMS_FHIR_DIR not set in .env")
-            print("\nUsage:")
-            print("  python download_cms_ndjson.py /path/to/output")
-            print("  OR set CMS_FHIR_DIR in .env")
-            sys.exit(1)
-        output_dir = Path(cms_dir)
-    
+    # Intentionally require the output directory to be explicitly provided.
+    # This script should fail fast if the caller hasn't decided where files go.
+    output_dir = Path(args.output_dir)
+
     # Create output directory if it doesn't exist
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Get CMS FHIR server URL - ALWAYS use CMS server, not test server
     # Priority: 1. Command line arg, 2. CMS_FHIR_URL env var, 3. Hardcoded CMS default
     # Explicitly ignore FHIR_SERVER_URL to avoid using test server
@@ -109,11 +99,11 @@ def main():
         fhir_url = args.cms_url
     else:
         fhir_url = os.getenv('CMS_FHIR_URL') or CMS_FHIR_URL
-    
+
     # Require authentication credentials
     username = _require_env(name='FHIR_API_USERNAME')
     password = _require_env(name='FHIR_API_PASSWORD')
-    
+
     # Safety check: warn if we're about to use test server
     if 'ndh-server.fast.hl7.org' in fhir_url.lower():
         print("⚠️  WARNING: You're about to download from the TEST server!")
@@ -126,7 +116,7 @@ def main():
         print("\nContinuing in 3 seconds...")
         import time
         time.sleep(3)
-    
+
     # Print configuration
     print("\n" + "=" * 80)
     print("CMS FHIR NDJSON Downloader")
@@ -142,7 +132,7 @@ def main():
         print(f"Resource Types: {args.resource_types}")
     print("=" * 80)
     print()
-    
+
     # Build command to run create_ndjson_from_api.py
     cmd = [
         sys.executable,
@@ -151,29 +141,29 @@ def main():
         str(output_dir),
         "--count", str(args.count),
     ]
-    
+
     if args.stop_after_this_many:
         cmd.extend(["--stop-after-this-many", str(args.stop_after_this_many)])
-    
+
     if args.resource_types:
         cmd.extend(["--resource-types", args.resource_types])
-    
+
     # Print command being executed
     print("Executing download command:")
     print("  " + " ".join(cmd))
     print("\n" + "=" * 80)
     print()
-    
+
     # Run the download script
     # The script will use FHIR_API_USERNAME and FHIR_API_PASSWORD from environment
     result = subprocess.run(cmd, cwd=str(REPO_ROOT))
-    
+
     if result.returncode == 0:
         print("\n" + "=" * 80)
         print("✅ Download Complete!")
         print("=" * 80)
         print(f"\nNDJSON files saved to: {output_dir}")
-        
+
         # List downloaded files
         ndjson_files = list(output_dir.glob("*.ndjson"))
         if ndjson_files:
@@ -186,7 +176,7 @@ def main():
         print(f"❌ Download failed with exit code {result.returncode}")
         print("=" * 80)
         sys.exit(result.returncode)
-    
+
     return 0
 
 
