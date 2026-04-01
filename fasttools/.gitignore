@@ -1,0 +1,17 @@
+# Local build outputs for fasttools.
+#
+# These binaries are OS/arch-specific and should not be committed.
+
+# Convention: build fasttools Go binaries with a .gobin suffix
+*.gobin
+
+# Backwards-compat: ignore the original binary name if it exists locally
+categorize_ndjson
+
+# Common Go build outputs
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
