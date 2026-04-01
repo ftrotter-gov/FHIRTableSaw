@@ -16,7 +16,11 @@ import argparse
 import os
 import subprocess
 import sys
+import signal
+import threading
+import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Ensure repo src/ is importable
 REPO_ROOT = Path(__file__).resolve().parent
@@ -31,6 +35,20 @@ from fhir_tablesaw_3tier.env import load_dotenv
 CMS_FHIR_URL = "https://dev.cnpd.internal.cms.gov/fhir/"
 
 
+DEFAULT_RESOURCE_TYPES: tuple[str, ...] = (
+    "Practitioner",
+    "PractitionerRole",
+    "Organization",
+    "OrganizationAffiliation",
+    "Endpoint",
+    "Location",
+)
+
+
+_RUNNING_PROCS_LOCK = threading.Lock()
+_RUNNING_PROCS: dict[str, subprocess.Popen] = {}
+
+
 def _require_env(*, name):
     """Get required environment variable or exit."""
     value = os.environ.get(name)
@@ -38,6 +56,160 @@ def _require_env(*, name):
         print(f"❌ ERROR: Required environment variable '{name}' is not set in .env")
         sys.exit(1)
     return value
+
+
+def _parse_resource_types(arg: str | None) -> list[str]:
+    if arg is None:
+        return list(DEFAULT_RESOURCE_TYPES)
+    rts = [x.strip() for x in arg.split(",") if x.strip()]
+    if not rts:
+        raise ValueError("--resource-types was provided but parsed to an empty list")
+    return rts
+
+
+def _build_create_ndjson_cmd(
+    *,
+    fhir_url: str,
+    output_dir: Path,
+    count: int,
+    stop_after_this_many: int | None,
+    resource_type: str,
+) -> list[str]:
+    cmd = [
+        sys.executable,
+        "-u",  # unbuffered so progress prints immediately even when piped
+        str(REPO_ROOT / "create_ndjson_from_api.py"),
+        fhir_url,
+        str(output_dir),
+        "--count",
+        str(count),
+        "--resource-types",
+        resource_type,
+    ]
+    if stop_after_this_many:
+        cmd.extend(["--stop-after-this-many", str(stop_after_this_many)])
+    return cmd
+
+
+def _stream_prefixed_lines(*, prefix: str, stream, is_stderr: bool) -> None:
+    # Read lines until EOF.
+    for line in iter(stream.readline, ""):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if is_stderr:
+            print(f"[{prefix}][ERR] {line}")
+        else:
+            print(f"[{prefix}] {line}")
+
+
+def _run_one_resource_type(*, resource_type: str, cmd: list[str]) -> int:
+    # Note: we keep stdout/stderr separate so we can mark stderr lines.
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    p = subprocess.Popen(
+        cmd,
+        cwd=str(REPO_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        start_new_session=True,
+        env=env,
+    )
+
+    with _RUNNING_PROCS_LOCK:
+        _RUNNING_PROCS[resource_type] = p
+
+    assert p.stdout is not None
+    assert p.stderr is not None
+
+    t_out = threading.Thread(
+        target=_stream_prefixed_lines,
+        kwargs={"prefix": resource_type, "stream": p.stdout, "is_stderr": False},
+        daemon=True,
+    )
+    t_err = threading.Thread(
+        target=_stream_prefixed_lines,
+        kwargs={"prefix": resource_type, "stream": p.stderr, "is_stderr": True},
+        daemon=True,
+    )
+
+    try:
+        t_out.start()
+        t_err.start()
+        rc = p.wait()
+        return int(rc)
+    finally:
+        # Ensure any final buffered lines are printed.
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
+        try:
+            p.stdout.close()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            p.stderr.close()
+        except Exception:  # noqa: BLE001
+            pass
+        with _RUNNING_PROCS_LOCK:
+            _RUNNING_PROCS.pop(resource_type, None)
+
+
+def _terminate_running_processes() -> None:
+    """Best-effort termination of any child downloads.
+
+    We start each child in a new session (process group) so we can terminate the
+    entire tree.
+    """
+
+    with _RUNNING_PROCS_LOCK:
+        items = list(_RUNNING_PROCS.items())
+
+    if not items:
+        return
+
+    print("\nTerminating running download subprocesses...")
+
+    # First pass: SIGTERM
+    for rt, p in items:
+        if p.poll() is not None:
+            continue
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            print(f"  [{rt}] sent SIGTERM")
+        except Exception:  # noqa: BLE001
+            try:
+                p.terminate()
+                print(f"  [{rt}] sent terminate()")
+            except Exception:  # noqa: BLE001
+                pass
+
+    # Wait briefly
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        still = False
+        for _, p in items:
+            if p.poll() is None:
+                still = True
+                break
+        if not still:
+            return
+        time.sleep(0.1)
+
+    # Second pass: SIGKILL
+    for rt, p in items:
+        if p.poll() is not None:
+            continue
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+            print(f"  [{rt}] sent SIGKILL")
+        except Exception:  # noqa: BLE001
+            try:
+                p.kill()
+                print(f"  [{rt}] sent kill()")
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def main():
@@ -133,32 +305,57 @@ def main():
     print("=" * 80)
     print()
 
-    # Build command to run create_ndjson_from_api.py
-    cmd = [
-        sys.executable,
-        str(REPO_ROOT / "create_ndjson_from_api.py"),
-        fhir_url,
-        str(output_dir),
-        "--count", str(args.count),
-    ]
+    # Parse resource types and run one subprocess per resource type in parallel.
+    resource_types = _parse_resource_types(args.resource_types)
 
-    if args.stop_after_this_many:
-        cmd.extend(["--stop-after-this-many", str(args.stop_after_this_many)])
+    cmds: dict[str, list[str]] = {}
+    for rt in resource_types:
+        cmds[rt] = _build_create_ndjson_cmd(
+            fhir_url=fhir_url,
+            output_dir=output_dir,
+            count=int(args.count),
+            stop_after_this_many=args.stop_after_this_many,
+            resource_type=rt,
+        )
 
-    if args.resource_types:
-        cmd.extend(["--resource-types", args.resource_types])
-
-    # Print command being executed
-    print("Executing download command:")
-    print("  " + " ".join(cmd))
+    print("Executing download commands (parallel, one per resource type):")
+    for rt in resource_types:
+        print(f"  [{rt}] " + " ".join(cmds[rt]))
     print("\n" + "=" * 80)
     print()
 
-    # Run the download script
-    # The script will use FHIR_API_USERNAME and FHIR_API_PASSWORD from environment
-    result = subprocess.run(cmd, cwd=str(REPO_ROOT))
+    results: dict[str, int] = {}
+    try:
+        # You asked for one thread per object type every time.
+        with ThreadPoolExecutor(max_workers=len(resource_types) or 1) as ex:
+            futs = {
+                ex.submit(_run_one_resource_type, resource_type=rt, cmd=cmds[rt]): rt
+                for rt in resource_types
+            }
+            for fut in as_completed(futs):
+                rt = futs[fut]
+                try:
+                    results[rt] = int(fut.result())
+                except Exception as ex2:  # noqa: BLE001
+                    print(f"[{rt}][ERR] ERROR: worker crashed: {type(ex2).__name__}: {ex2}")
+                    results[rt] = 99
+    except KeyboardInterrupt:
+        print("\nInterrupted (Ctrl+C). Terminating running downloads...")
+        _terminate_running_processes()
+        # Best-effort: return non-zero.
+        return 130
 
-    if result.returncode == 0:
+    failed = {rt: rc for rt, rc in results.items() if rc != 0}
+
+    print("\n" + "=" * 80)
+    print("Parallel download summary")
+    print("=" * 80)
+    for rt in resource_types:
+        rc = results.get(rt, 99)
+        status = "OK" if rc == 0 else f"FAILED(rc={rc})"
+        print(f"{rt:24s} {status}")
+
+    if not failed:
         print("\n" + "=" * 80)
         print("✅ Download Complete!")
         print("=" * 80)
@@ -173,9 +370,11 @@ def main():
                 print(f"  📄 {ndjson_file.name} ({size_mb:.2f} MB)")
     else:
         print("\n" + "=" * 80)
-        print(f"❌ Download failed with exit code {result.returncode}")
+        print("❌ Download failed for one or more resource types")
         print("=" * 80)
-        sys.exit(result.returncode)
+        # Return the first failure code (deterministic order).
+        first_rt = sorted(failed.keys())[0]
+        sys.exit(int(failed[first_rt]))
 
     return 0
 
