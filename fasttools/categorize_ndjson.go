@@ -41,11 +41,13 @@ type counts struct {
 	totalLines   uint64
 	invalidLines uint64
 	emptyLines   uint64
-	md5ByInput   map[string]string
+	md5Hex       string
+	sizeBytes    uint64
+	hasSize      bool
 }
 
 func newCounts() *counts {
-	return &counts{byType: make(map[string]uint64), md5ByInput: make(map[string]string)}
+	return &counts{byType: make(map[string]uint64)}
 }
 
 func main() {
@@ -54,6 +56,7 @@ func main() {
 	precount := flag.Bool("precount", true, "pre-scan inputs (like wc -l) to enable progress reporting")
 	progress := flag.Bool("progress", true, "print a progress bar to stderr while scanning")
 	printMD5 := flag.Bool("md5", true, "print md5sum for each input file at the end of output")
+	printSize := flag.Bool("size", true, "print file size in bytes for each input file at the end of output")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <file|dir|->...\n\n", os.Args[0])
 		fmt.Fprintln(os.Stderr, "Streams NDJSON (FHIR Bulk Export style) and counts resourceType occurrences.")
@@ -81,28 +84,36 @@ func main() {
 	}
 
 	opts := options{
-		strict:   *strict,
-		precount: *precount,
-		progress: *progress,
-		printMD5: *printMD5,
+		strict:    *strict,
+		precount:  *precount,
+		progress:  *progress,
+		printMD5:  *printMD5,
+		printSize: *printSize,
 	}
 
 	c := newCounts()
-	for _, in := range inputs {
+	for idx, in := range inputs {
+		if idx > 0 {
+			fmt.Fprintln(os.Stdout)
+		}
+		fmt.Fprintf(os.Stdout, "FILE\t%s\n", in)
+
+		// New counts per input.
+		c = newCounts()
 		if err := processInput(in, c, opts); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
+		printCounts(os.Stdout, c, !*noHeader)
 	}
-
-	printCounts(os.Stdout, c, inputs, !*noHeader)
 }
 
 type options struct {
-	strict   bool
-	precount bool
-	progress bool
-	printMD5 bool
+	strict    bool
+	precount  bool
+	progress  bool
+	printMD5  bool
+	printSize bool
 }
 
 // expandInputs turns the raw CLI args into concrete stream inputs.
@@ -150,6 +161,15 @@ func expandInputs(args []string) ([]string, error) {
 }
 
 func processInput(path string, c *counts, opts options) error {
+	if path != "-" && opts.printSize {
+		sz, err := fileSizeBytes(path)
+		if err != nil {
+			return err
+		}
+		c.sizeBytes = sz
+		c.hasSize = true
+	}
+
 	var expectedLines *uint64
 	if path != "-" && (opts.precount || opts.printMD5) {
 		if opts.precount {
@@ -159,7 +179,7 @@ func processInput(path string, c *counts, opts options) error {
 			}
 			expectedLines = &n
 			if opts.printMD5 {
-				c.md5ByInput[path] = md5Hex
+				c.md5Hex = md5Hex
 			}
 			if opts.progress {
 				fmt.Fprintf(os.Stderr, "%s: %d lines\n", displayPath(path), n)
@@ -169,7 +189,7 @@ func processInput(path string, c *counts, opts options) error {
 			if err != nil {
 				return err
 			}
-			c.md5ByInput[path] = md5Hex
+			c.md5Hex = md5Hex
 		}
 	}
 
@@ -383,12 +403,23 @@ func md5File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func fileSizeBytes(path string) (uint64, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	if fi.Size() < 0 {
+		return 0, fmt.Errorf("%s: negative file size??", path)
+	}
+	return uint64(fi.Size()), nil
+}
+
 type countRow struct {
 	resourceType string
 	count        uint64
 }
 
-func printCounts(w io.Writer, c *counts, inputs []string, withHeader bool) {
+func printCounts(w io.Writer, c *counts, withHeader bool) {
 	rows := make([]countRow, 0, len(c.byType))
 	for rt, cnt := range c.byType {
 		rows = append(rows, countRow{resourceType: rt, count: cnt})
@@ -416,12 +447,11 @@ func printCounts(w io.Writer, c *counts, inputs []string, withHeader bool) {
 	if c.invalidLines > 0 {
 		fmt.Fprintf(w, "INVALID_LINES\t%d\n", c.invalidLines)
 	}
-	if len(c.md5ByInput) > 0 {
-		for _, in := range inputs {
-			if md5Hex, ok := c.md5ByInput[in]; ok {
-				fmt.Fprintf(w, "MD5SUM\t%s\t%s\n", md5Hex, in)
-			}
-		}
+	if c.md5Hex != "" {
+		fmt.Fprintf(w, "MD5SUM\t%s\n", c.md5Hex)
+	}
+	if c.hasSize {
+		fmt.Fprintf(w, "FILE_SIZE_BYTES\t%d\n", c.sizeBytes)
 	}
 }
 
