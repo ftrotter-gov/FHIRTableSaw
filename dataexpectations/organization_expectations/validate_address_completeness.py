@@ -16,6 +16,8 @@ ingestion pipeline.
 
 This test covers both Organization and Location FHIR resource types, since both are expected
 to carry physical address information in a healthcare directory context.
+
+TODO: Add validation of a subset of addresses using SmartyStreets (et al) validated data.
 """
 from src.utils.inlaw import InLaw
 

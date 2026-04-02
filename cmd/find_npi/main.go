@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	go run fasttools/find_npi.go <npi> <input.ndjson> <output.json>
+//	go run ./cmd/find_npi --npi 1234567890 --input practitioners.ndjson --output matches.json
 //
 // Notes:
 //   - The input may be plain NDJSON or gzip-compressed (*.gz) by extension.
@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -29,36 +30,27 @@ import (
 const usNPISystem = "http://hl7.org/fhir/sid/us-npi"
 
 func main() {
-	if len(os.Args) != 4 {
+	npi := flag.String("npi", "", "NPI to search for (identifier.system==http://hl7.org/fhir/sid/us-npi)")
+	inputPath := flag.String("input", "", "Input path to NDJSON file, .gz supported; use '-' for stdin")
+	outputPath := flag.String("output", "", "Output path to write pretty-printed JSON array")
+	flag.Parse()
+
+	if strings.TrimSpace(*npi) == "" || strings.TrimSpace(*inputPath) == "" || strings.TrimSpace(*outputPath) == "" {
 		usage(os.Stderr)
 		os.Exit(2)
 	}
 
-	npi := strings.TrimSpace(os.Args[1])
-	inputPath := os.Args[2]
-	outputPath := os.Args[3]
-
-	if npi == "" {
-		fmt.Fprintln(os.Stderr, "error: npi must not be empty")
-		usage(os.Stderr)
-		os.Exit(2)
-	}
-
-	if err := run(npi, inputPath, outputPath); err != nil {
+	if err := run(strings.TrimSpace(*npi), strings.TrimSpace(*inputPath), strings.TrimSpace(*outputPath)); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: %s <npi> <input.ndjson|input.ndjson.gz|-> <output.json>\n", os.Args[0])
+	fmt.Fprintf(w, "Usage: %s --npi <npi> --input <input.ndjson|input.ndjson.gz|-> --output <output.json>\n", os.Args[0])
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Scans a FHIR NDJSON file and outputs pretty-printed JSON for resources containing the NPI.")
 	fmt.Fprintln(w, "The NPI is detected in identifier[] where system == http://hl7.org/fhir/sid/us-npi.")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Examples:")
-	fmt.Fprintf(w, "  %s 1234567890 practitioners.ndjson matches.json\n", os.Args[0])
-	fmt.Fprintf(w, "  %s 1234567890 practitioners.ndjson.gz matches.json\n", os.Args[0])
 }
 
 func run(npi, inputPath, outputPath string) error {
@@ -95,11 +87,9 @@ func run(npi, inputPath, outputPath string) error {
 	}
 	defer func() { _ = outF.Close() }()
 
-	// Stream in and stream out. We build the output JSON array incrementally.
 	enc := json.NewEncoder(outF)
 	enc.SetIndent("", "  ")
 
-	// We'll write the JSON array manually so we don't have to store all matches in memory.
 	if _, err := outF.WriteString("[\n"); err != nil {
 		return err
 	}
@@ -120,7 +110,6 @@ func run(npi, inputPath, outputPath string) error {
 			continue
 		}
 
-		// Decode only what we need for matching, but keep the full object for output.
 		var obj any
 		if err := json.Unmarshal(line, &obj); err != nil {
 			invalidCount++
@@ -138,7 +127,6 @@ func run(npi, inputPath, outputPath string) error {
 			}
 		}
 
-		// Encode the matching resource. json.Encoder adds a trailing newline, which is fine.
 		if err := enc.Encode(obj); err != nil {
 			return fmt.Errorf("failed to write output JSON (line %d): %w", lineNum, err)
 		}
@@ -148,16 +136,8 @@ func run(npi, inputPath, outputPath string) error {
 		return fmt.Errorf("scan error: %w", err)
 	}
 
-	// Close array; keep output nicely formatted.
-	if matchCount > 0 {
-		// json.Encoder added a newline after the last element; keep it.
-		if _, err := outF.WriteString("]\n"); err != nil {
-			return err
-		}
-	} else {
-		if _, err := outF.WriteString("]\n"); err != nil {
-			return err
-		}
+	if _, err := outF.WriteString("]\n"); err != nil {
+		return err
 	}
 
 	if invalidCount > 0 {
@@ -167,8 +147,6 @@ func run(npi, inputPath, outputPath string) error {
 	return nil
 }
 
-// containsNPI checks for the NPI in identifier[]. This is written against generic JSON
-// (map[string]any) to avoid needing generated FHIR structs.
 func containsNPI(obj any, targetNPI string) bool {
 	m, ok := obj.(map[string]any)
 	if !ok {
