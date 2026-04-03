@@ -203,9 +203,13 @@ def _extract_bundle(
 
 @dataclass(frozen=True)
 class RetryConfig:
-    retries: int = 5
+    # Number of attempts per request (initial try + retries).
+    retries: int = 6
     backoff_seconds: float = 0.5
-    timeout_seconds: float = 30.0
+    # Initial per-request timeout. On each failed attempt within a single request,
+    # the timeout doubles (2m, 4m, 8m, ...). Each new request starts back at the
+    # initial timeout.
+    timeout_seconds: float = 120.0
 
 
 @dataclass(frozen=True)
@@ -223,6 +227,228 @@ class CurlDebugConfig:
 
     curl_on_error: bool = True
     body_snippet_chars: int = 2000
+
+
+@dataclass(frozen=True)
+class DownloadPage:
+    page_num: int
+    resources: list[dict[str, Any]]
+    next_url: str | None
+    total_hint: int | None
+
+
+@dataclass
+class ResourceDownloadState:
+    version: int
+    resource_type: str
+    output_file: str
+    status: str
+    request_url: str
+    request_params: dict[str, str] | None
+    first_request: bool
+    pages_completed: int
+    resources_written: int
+    assembled_pages: int
+    assembled_bytes: int
+    completed_at: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "resource_type": self.resource_type,
+            "output_file": self.output_file,
+            "status": self.status,
+            "request_url": self.request_url,
+            "request_params": self.request_params,
+            "first_request": self.first_request,
+            "pages_completed": self.pages_completed,
+            "resources_written": self.resources_written,
+            "assembled_pages": self.assembled_pages,
+            "assembled_bytes": self.assembled_bytes,
+            "completed_at": self.completed_at,
+        }
+
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> "ResourceDownloadState":
+        return cls(
+            version=int(payload.get("version", 1)),
+            resource_type=str(payload["resource_type"]),
+            output_file=str(payload["output_file"]),
+            status=str(payload.get("status", "in_progress")),
+            request_url=str(payload.get("request_url") or payload["resource_type"]),
+            request_params=payload.get("request_params"),
+            first_request=bool(payload.get("first_request", True)),
+            pages_completed=int(payload.get("pages_completed", 0)),
+            resources_written=int(payload.get("resources_written", 0)),
+            assembled_pages=int(payload.get("assembled_pages", 0)),
+            assembled_bytes=int(payload.get("assembled_bytes", 0)),
+            completed_at=payload.get("completed_at"),
+        )
+
+
+def _resource_state_dir(*, output_dir: Path, resource_type: str) -> Path:
+    return output_dir / "download_state" / _safe_path_component(resource_type)
+
+
+def _resource_state_path(*, output_dir: Path, resource_type: str) -> Path:
+    return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "state.json"
+
+
+def _resource_pages_dir(*, output_dir: Path, resource_type: str) -> Path:
+    return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "pages"
+
+
+def _resource_page_path(*, output_dir: Path, resource_type: str, page_num: int) -> Path:
+    return _resource_pages_dir(output_dir=output_dir, resource_type=resource_type) / f"page_{page_num:06d}.ndjson"
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
+        f.write("\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _load_or_init_resource_state(*, output_dir: Path, resource_type: str, count: int) -> ResourceDownloadState:
+    state_path = _resource_state_path(output_dir=output_dir, resource_type=resource_type)
+    if state_path.exists():
+        with state_path.open("r", encoding="utf-8") as f:
+            return ResourceDownloadState.from_json(json.load(f))
+
+    return ResourceDownloadState(
+        version=1,
+        resource_type=resource_type,
+        output_file=_snake_file_name(resource_type),
+        status="in_progress",
+        request_url=resource_type,
+        request_params={
+            "_count": str(count),
+            "page_size": str(count),
+            "_total": "none",
+        },
+        first_request=True,
+        pages_completed=0,
+        resources_written=0,
+        assembled_pages=0,
+        assembled_bytes=0,
+    )
+
+
+def _save_resource_state(*, output_dir: Path, state: ResourceDownloadState) -> None:
+    _write_json_atomic(_resource_state_path(output_dir=output_dir, resource_type=state.resource_type), state.to_json())
+
+
+def _append_file(*, src: Path, dest: Path) -> int:
+    written = 0
+    with src.open("rb") as src_f, dest.open("ab") as dest_f:
+        while True:
+            chunk = src_f.read(1024 * 1024)
+            if not chunk:
+                break
+            dest_f.write(chunk)
+            written += len(chunk)
+        dest_f.flush()
+        os.fsync(dest_f.fileno())
+    return written
+
+
+def _rebuild_output_from_pages(
+    *,
+    output_dir: Path,
+    resource_type: str,
+    output_path: Path,
+    page_count: int,
+) -> int:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(output_path.name + ".rebuild")
+    if tmp_path.exists():
+        tmp_path.unlink()
+    total_bytes = 0
+    tmp_path.touch()
+    for page_num in range(1, page_count + 1):
+        page_path = _resource_page_path(output_dir=output_dir, resource_type=resource_type, page_num=page_num)
+        if not page_path.exists():
+            raise FileNotFoundError(f"Missing committed page file for {resource_type}: {page_path}")
+        total_bytes += _append_file(src=page_path, dest=tmp_path)
+    os.replace(tmp_path, output_path)
+    return total_bytes
+
+
+def _sync_output_from_pages(*, output_dir: Path, state: ResourceDownloadState) -> ResourceDownloadState:
+    output_path = output_dir / state.output_file
+    expected_bytes = int(state.assembled_bytes)
+    if output_path.exists() and output_path.stat().st_size != expected_bytes:
+        expected_bytes = _rebuild_output_from_pages(
+            output_dir=output_dir,
+            resource_type=state.resource_type,
+            output_path=output_path,
+            page_count=state.assembled_pages,
+        )
+        state.assembled_bytes = expected_bytes
+
+    if not output_path.exists():
+        expected_bytes = _rebuild_output_from_pages(
+            output_dir=output_dir,
+            resource_type=state.resource_type,
+            output_path=output_path,
+            page_count=state.assembled_pages,
+        )
+        state.assembled_bytes = expected_bytes
+
+    bytes_now = int(state.assembled_bytes)
+    for page_num in range(state.assembled_pages + 1, state.pages_completed + 1):
+        page_path = _resource_page_path(output_dir=output_dir, resource_type=state.resource_type, page_num=page_num)
+        bytes_now += _append_file(src=page_path, dest=output_path)
+        state.assembled_pages = page_num
+        state.assembled_bytes = bytes_now
+        _save_resource_state(output_dir=output_dir, state=state)
+
+    if state.assembled_pages == 0 and not output_path.exists():
+        output_path.write_text("", encoding="utf-8")
+        state.assembled_bytes = 0
+
+    return state
+
+
+def _commit_download_page(
+    *,
+    output_dir: Path,
+    state: ResourceDownloadState,
+    page: DownloadPage,
+    hard_limit_reached: bool,
+) -> ResourceDownloadState:
+    pages_dir = _resource_pages_dir(output_dir=output_dir, resource_type=state.resource_type)
+    pages_dir.mkdir(parents=True, exist_ok=True)
+
+    page_path = _resource_page_path(output_dir=output_dir, resource_type=state.resource_type, page_num=page.page_num)
+    tmp_page = page_path.with_name(page_path.name + ".tmp")
+    with tmp_page.open("w", encoding="utf-8") as f:
+        for res in page.resources:
+            f.write(json.dumps(res, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_page, page_path)
+
+    state.pages_completed = page.page_num
+    state.resources_written += len(page.resources)
+    state.request_url = page.next_url or state.request_url
+    state.request_params = None if page.next_url else state.request_params
+    state.first_request = False
+    if hard_limit_reached or page.next_url is None:
+        state.status = "completed"
+        state.completed_at = _now_iso()
+    else:
+        state.status = "in_progress"
+        state.completed_at = None
+        state.request_url = page.next_url
+        state.request_params = None
+
+    _save_resource_state(output_dir=output_dir, state=state)
+    return _sync_output_from_pages(output_dir=output_dir, state=state)
 
 
 def _sleep_backoff(backoff_seconds: float, attempt: int) -> None:
@@ -408,9 +634,13 @@ def _request_with_retry(
     curl_auth: tuple[str, str] | None,
 ) -> httpx.Response:
     last_exc: Exception | None = None
+    # Start each request with the configured initial timeout. If we retry this
+    # request, we exponentially increase the timeout. The next request (next page)
+    # resets back to retry.timeout_seconds.
+    timeout = float(retry.timeout_seconds)
     for attempt in range(1, max(retry.retries, 1) + 1):
         try:
-            r = client.request(method, url, params=params)
+            r = client.request(method, url, params=params, timeout=timeout)
             # Raise on error statuses so we handle retries consistently.
             r.raise_for_status()
             return r
@@ -445,7 +675,7 @@ def _request_with_retry(
                         full_url=full_url,
                         username=curl_auth[0],
                         password=curl_auth[1],
-                        timeout_seconds=retry.timeout_seconds,
+                        timeout_seconds=timeout,
                         accept_header=client.headers.get("Accept", "application/fhir+json"),
                         body_snippet_chars=curl_debug.body_snippet_chars,
                     )
@@ -459,6 +689,9 @@ def _request_with_retry(
                 log_fn(event)
                 if attempt >= retry.retries:
                     raise
+
+                # Increase timeout for the next retry attempt.
+                timeout = timeout * 2
                 if retry_after is not None:
                     time.sleep(min(retry_after, 120.0))
                 else:
@@ -481,7 +714,7 @@ def _request_with_retry(
                     full_url=full_url,
                     username=curl_auth[0],
                     password=curl_auth[1],
-                    timeout_seconds=retry.timeout_seconds,
+                    timeout_seconds=timeout,
                     accept_header=client.headers.get("Accept", "application/fhir+json"),
                     body_snippet_chars=curl_debug.body_snippet_chars,
                 )
@@ -511,7 +744,7 @@ def _request_with_retry(
                     full_url=full_url,
                     username=curl_auth[0],
                     password=curl_auth[1],
-                    timeout_seconds=retry.timeout_seconds,
+                    timeout_seconds=timeout,
                     accept_header=client.headers.get("Accept", "application/fhir+json"),
                     body_snippet_chars=curl_debug.body_snippet_chars,
                 )
@@ -524,6 +757,9 @@ def _request_with_retry(
             log_fn(event3)
             if attempt >= retry.retries:
                 raise
+
+            # Increase timeout for the next retry attempt.
+            timeout = timeout * 2
             _sleep_backoff(retry.backoff_seconds, attempt)
             continue
         except Exception as ex:  # noqa: BLE001
@@ -555,6 +791,7 @@ def _make_failure_logger(*, log_dir: Path, resource_type: str):
 def fetch_resources(
     *,
     client: httpx.Client,
+    output_dir: Path,
     resource_type: str,
     count: int,
     hard_limit: int | None,
@@ -563,25 +800,34 @@ def fetch_resources(
     url_print: UrlPrintConfig,
     curl_debug: CurlDebugConfig,
     curl_auth: tuple[str, str] | None,
-) -> Iterable[dict[str, Any]]:
-    """Yield raw FHIR resources of a given type using paging."""
+) -> Iterable[DownloadPage]:
+    """Yield committed pages of raw FHIR resources using resumable paging state."""
 
     log_fn = _make_failure_logger(log_dir=log_dir, resource_type=resource_type)
 
-    # Some servers use non-FHIR `page_size` rather than `_count`.
-    # We send both on the first request; for next links we follow server-provided URLs.
-    # However, some servers reject requests with both parameters, so we'll retry with just _count if needed.
-    params: dict[str, str] | None = {
-        "_count": str(count),
-        "page_size": str(count),
-        "_total": "none",
-    }
-    url: str = resource_type
-    seen = 0
-    page_num = 0
-    first_request = True
+    state = _load_or_init_resource_state(output_dir=output_dir, resource_type=resource_type, count=count)
+    if state.request_params is not None:
+        state.request_params["_count"] = str(count)
+        if "page_size" in state.request_params:
+            state.request_params["page_size"] = str(count)
+
+    state = _sync_output_from_pages(output_dir=output_dir, state=state)
+    _save_resource_state(output_dir=output_dir, state=state)
+
+    if state.status == "completed":
+        print(
+            f"{resource_type}: resume state already complete "
+            f"(pages={state.pages_completed} written={state.resources_written})"
+        )
+        return
+
+    seen = state.resources_written
+    page_num = state.pages_completed
 
     while True:
+        url = state.request_url
+        params = state.request_params
+        first_request = state.first_request
         ctx = {"resource_type": resource_type, "url": url, "params": params}
 
         if url_print.print_urls:
@@ -614,15 +860,15 @@ def fetch_resources(
                     "status_code": ex.response.status_code,
                     "original_params": params,
                 })
-                
+
                 # Retry with just _count
                 params = {"_count": str(count), "_total": "none"}
                 ctx = {"resource_type": resource_type, "url": url, "params": params}
-                
+
                 if url_print.print_urls:
                     full = _build_full_url(client, url, params)
                     print(f"GET {full}")
-                
+
                 r = _request_with_retry(
                     client,
                     "GET",
@@ -634,11 +880,12 @@ def fetch_resources(
                     curl_debug=curl_debug,
                     curl_auth=curl_auth,
                 )
+                state.request_params = params
             else:
                 # Not a parameter conflict or not the first request - re-raise
                 raise
-        
-        first_request = False
+
+        state.first_request = False
 
         # Diagnostics for unexpected payloads.
         status_code = r.status_code
@@ -754,21 +1001,25 @@ def fetch_resources(
                 f"downloaded_this_type={projected_seen}"
             )
 
-        for res in entries:
-            yield res
-            seen += 1
-            if hard_limit is not None and seen >= hard_limit:
-                return
-
-        # Prefer wrapper next URL if present.
         next_url = wrapped_next or _find_next_link(bundle)
-        if not next_url:
-            return
+        page_resources: list[dict[str, Any]] = []
+        hard_limit_reached = False
+        for res in entries:
+            if hard_limit is not None and seen >= hard_limit:
+                hard_limit_reached = True
+                break
+            page_resources.append(res)
+            seen += 1
 
-        # After the first request, the server typically provides an absolute
-        # URL. httpx can request absolute URLs even with base_url configured.
-        url = next_url
-        params = None
+        yield DownloadPage(
+            page_num=page_num,
+            resources=page_resources,
+            next_url=None if hard_limit_reached else next_url,
+            total_hint=total_hint,
+        )
+
+        if hard_limit_reached or not next_url:
+            return
 
 
 def export_ndjson(
@@ -807,63 +1058,67 @@ def export_ndjson(
     ) as client:
         for rt in resource_types:
             out_path = output_dir / _snake_file_name(rt)
-            # Overwrite.
-            out_path.write_text("", encoding="utf-8")
 
             log_fn = _make_failure_logger(log_dir=log_dir, resource_type=rt)
-            downloaded = 0
-            written = 0
+            state = _load_or_init_resource_state(output_dir=output_dir, resource_type=rt, count=count)
+            downloaded = int(state.resources_written)
+            written = int(state.resources_written)
             failed = 0
             started = time.time()
 
             print(f"--- Exporting {rt} -> {out_path} ---")
             try:
-                with out_path.open("a", encoding="utf-8") as f:
-                    for res in fetch_resources(
-                        client=client,
-                        resource_type=rt,
-                        count=count,
-                        hard_limit=hard_limit,
-                        retry=retry,
-                        log_dir=log_dir,
-                        url_print=url_print,
-                        curl_debug=curl_debug,
-                        curl_auth=(username, password),
-                    ):
-                        downloaded += 1
-                        overall_downloaded += 1
+                for page in fetch_resources(
+                    client=client,
+                    output_dir=output_dir,
+                    resource_type=rt,
+                    count=count,
+                    hard_limit=hard_limit,
+                    retry=retry,
+                    log_dir=log_dir,
+                    url_print=url_print,
+                    curl_debug=curl_debug,
+                    curl_auth=(username, password),
+                ):
+                    try:
+                        hard_limit_reached = hard_limit is not None and (downloaded + len(page.resources)) >= hard_limit
+                        state = _load_or_init_resource_state(output_dir=output_dir, resource_type=rt, count=count)
+                        state = _commit_download_page(
+                            output_dir=output_dir,
+                            state=state,
+                            page=page,
+                            hard_limit_reached=hard_limit_reached,
+                        )
+                        downloaded = state.resources_written
+                        written = state.resources_written
+                        overall_downloaded += len(page.resources)
+                        overall_written += len(page.resources)
 
-                        try:
-                            f.write(json.dumps(res, ensure_ascii=False) + "\n")
-                            written += 1
-                            overall_written += 1
-
-                            if progress_every and downloaded % max(progress_every, 1) == 0:
-                                elapsed = max(time.time() - started, 0.000001)
-                                rate = downloaded / elapsed
-                                overall_elapsed = max(time.time() - overall_started, 0.000001)
-                                overall_rate = overall_downloaded / overall_elapsed
-                                print(
-                                    f"{rt}: downloaded={downloaded} written={written} failed_write={failed} "
-                                    f"elapsed={elapsed:0.1f}s rate={rate:0.1f}/s | "
-                                    f"overall_downloaded={overall_downloaded} overall_written={overall_written} "
-                                    f"overall_rate={overall_rate:0.1f}/s"
-                                )
-                        except Exception as ex:  # noqa: BLE001
-                            failed += 1
-                            log_fn(
-                                {
-                                    "resource_type": rt,
-                                    "kind": "write_error",
-                                    "error": str(ex),
-                                    "traceback": "".join(
-                                        traceback.format_exception(type(ex), ex, ex.__traceback__)
-                                    ),
-                                    "resource_id": res.get("id"),
-                                }
+                        if progress_every and downloaded % max(progress_every, 1) == 0:
+                            elapsed = max(time.time() - started, 0.000001)
+                            rate = downloaded / elapsed
+                            overall_elapsed = max(time.time() - overall_started, 0.000001)
+                            overall_rate = overall_downloaded / overall_elapsed
+                            print(
+                                f"{rt}: downloaded={downloaded} written={written} failed_write={failed} "
+                                f"elapsed={elapsed:0.1f}s rate={rate:0.1f}/s | "
+                                f"overall_downloaded={overall_downloaded} overall_written={overall_written} "
+                                f"overall_rate={overall_rate:0.1f}/s"
                             )
-                            # Continue exporting.
-                            continue
+                    except Exception as ex:  # noqa: BLE001
+                        failed += 1
+                        log_fn(
+                            {
+                                "resource_type": rt,
+                                "kind": "write_error",
+                                "error": str(ex),
+                                "traceback": "".join(
+                                    traceback.format_exception(type(ex), ex, ex.__traceback__)
+                                ),
+                                "page_num": page.page_num,
+                            }
+                        )
+                        raise
             except Exception as ex:  # noqa: BLE001
                 failed += 1
                 print(f"ERROR: export of {rt} failed: {type(ex).__name__}: {ex}")
@@ -933,8 +1188,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--retries",
         type=int,
-        default=5,
-        help="Retry attempts for transient HTTP failures. Default: 5",
+        default=6,
+        help="Retry attempts for transient HTTP failures. Default: 6",
     )
     p.add_argument(
         "--backoff",
@@ -945,8 +1200,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--timeout",
         type=float,
-        default=30.0,
-        help="Request timeout seconds. Default: 30",
+        default=120.0,
+        help=(
+            "Initial request timeout seconds. Each retry attempt doubles the timeout. "
+            "Each new request resets back to this initial timeout. Default: 120"
+        ),
     )
     p.add_argument(
         "--log-dir",

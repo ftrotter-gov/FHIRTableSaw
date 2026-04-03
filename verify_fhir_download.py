@@ -247,7 +247,7 @@ def fetch_expected_total(
     client: httpx.Client,
     resource_type: str,
     max_attempts_per_url: int = 6,
-    initial_timeout_seconds: float = 60.0,
+    initial_timeout_seconds: float = 120.0,
 ) -> ApiCount:
     """Fetch expected total for a resource type using CMS-friendly methods.
 
@@ -365,6 +365,22 @@ def write_csv_report(
                 if delta > int(allow_delta):
                     status = "FAIL"
 
+            # Always emit a machine-readable status summary to stderr.
+            # Keep stdout for the CSV path message.
+            if api.expected_total is None:
+                delta_val: int | None = None
+            else:
+                delta_val = abs(int(api.expected_total) - int(stats.unique_id_count))
+            print(
+                "VERIFY_STATUS "
+                f"resource_type={rt} status={status} "
+                f"file_unique_ids={stats.unique_id_count} "
+                f"api_total={_fmt_int(api.expected_total)} "
+                f"delta={_fmt_int(delta_val)} "
+                f"parse_errors={stats.parse_error_count} missing_ids={stats.missing_id_count} duplicates={stats.duplicate_id_count}",
+                file=sys.stderr,
+            )
+
             if status != "PASS":
                 any_fail = True
 
@@ -410,10 +426,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--timeout",
         type=float,
-        default=60.0,
+        default=120.0,
         help=(
             "Initial HTTP timeout seconds for each API count URL. "
-            "Each failed attempt doubles the timeout (default: 60)."
+            "Each failed attempt doubles the timeout (default: 120)."
         ),
     )
     p.add_argument(

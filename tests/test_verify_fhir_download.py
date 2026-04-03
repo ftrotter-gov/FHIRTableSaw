@@ -164,6 +164,7 @@ def test_progress_prints_to_stderr(tmp_path: Path, capsys):
 
         captured = capsys.readouterr()
         assert "Working on Organization" in captured.err
+        assert "VERIFY_STATUS resource_type=Organization" in captured.err
         assert "Done Organization" in captured.err
         assert "timings: file_parse_seconds=" in captured.err
         assert "api_count_seconds=" in captured.err

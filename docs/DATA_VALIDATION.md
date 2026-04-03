@@ -232,7 +232,7 @@ python verify_fhir_download.py /path/to/download_dir https://dev.cnpd.internal.c
 ```
 
 The verifier retries each API "count" URL up to **6 times**. The first attempt uses
-`--timeout` seconds (default: 60s), and after each failed attempt the timeout doubles.
+`--timeout` seconds (default: 120s), and after each failed attempt the timeout doubles.
 
 By default it writes a CSV report to:
 

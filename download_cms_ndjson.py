@@ -17,10 +17,12 @@ import os
 import subprocess
 import sys
 import signal
+import shutil
 import threading
 import time
+import re
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 # Ensure repo src/ is importable
 REPO_ROOT = Path(__file__).resolve().parent
@@ -67,6 +69,17 @@ def _parse_resource_types(arg: str | None) -> list[str]:
     return rts
 
 
+def _snake_file_name(resource_type: str) -> str:
+    """Match create_ndjson_from_api.py's filename convention (snake_case.ndjson)."""
+
+    out: list[str] = []
+    for i, ch in enumerate(resource_type):
+        if ch.isupper() and i != 0:
+            out.append("_")
+        out.append(ch.lower())
+    return "".join(out) + ".ndjson"
+
+
 def _build_create_ndjson_cmd(
     *,
     fhir_url: str,
@@ -85,10 +98,100 @@ def _build_create_ndjson_cmd(
         str(count),
         "--resource-types",
         resource_type,
+        # Generous timeouts/retries to reduce timeout errors.
+        "--retries",
+        "6",
+        "--timeout",
+        "120",
     ]
     if stop_after_this_many:
         cmd.extend(["--stop-after-this-many", str(stop_after_this_many)])
     return cmd
+
+
+def _resource_state_dir(*, output_dir: Path, resource_type: str) -> Path:
+    safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in resource_type).strip("._")
+    safe = safe or "unknown"
+    return output_dir / "download_state" / safe
+
+
+def _reset_resource_download_state(*, output_dir: Path, resource_type: str) -> None:
+    ndjson_path = output_dir / _snake_file_name(resource_type)
+    state_dir = _resource_state_dir(output_dir=output_dir, resource_type=resource_type)
+
+    if ndjson_path.exists():
+        ndjson_path.unlink()
+    if state_dir.exists():
+        shutil.rmtree(state_dir)
+
+
+def _build_verify_cmd(*, ndjson_dir: Path, fhir_url: str, allow_delta: int, resource_type: str) -> list[str]:
+    # Verify only a single resource type.
+    return [
+        sys.executable,
+        "-u",
+        str(REPO_ROOT / "verify_fhir_download.py"),
+        str(ndjson_dir),
+        str(fhir_url),
+        "--allow-delta",
+        str(int(allow_delta)),
+        "--resource-types",
+        resource_type,
+        "--timeout",
+        "120",
+    ]
+
+
+_VERIFY_STATUS_RE = re.compile(r"^VERIFY_STATUS\s+(.*)$")
+
+
+def _parse_verify_status_line(line: str) -> dict[str, str]:
+    """Parse `VERIFY_STATUS key=value ...` lines from verify_fhir_download.py stderr."""
+
+    m = _VERIFY_STATUS_RE.match(line.strip())
+    if not m:
+        return {}
+    rest = m.group(1)
+    out: dict[str, str] = {}
+    for token in rest.split():
+        if "=" not in token:
+            continue
+        k, v = token.split("=", 1)
+        out[k] = v
+    return out
+
+
+def _run_verify_one_resource_type(
+    *,
+    resource_type: str,
+    ndjson_dir: Path,
+    fhir_url: str,
+    allow_delta: int,
+) -> tuple[int, dict[str, str]]:
+    cmd = _build_verify_cmd(
+        ndjson_dir=ndjson_dir,
+        fhir_url=fhir_url,
+        allow_delta=int(allow_delta),
+        resource_type=resource_type,
+    )
+    cp = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+
+    # verify_fhir_download prints status lines to stderr.
+    status_fields: dict[str, str] = {}
+    for raw in (cp.stderr or "").splitlines():
+        parsed = _parse_verify_status_line(raw)
+        if parsed.get("resource_type") == resource_type:
+            status_fields = parsed
+
+    # Echo verifier output for operator visibility.
+    if cp.stderr:
+        for ln in cp.stderr.splitlines():
+            print(f"[verify:{resource_type}][ERR] {ln}")
+    if cp.stdout:
+        for ln in cp.stdout.splitlines():
+            print(f"[verify:{resource_type}] {ln}")
+
+    return int(cp.returncode), status_fields
 
 
 def _stream_prefixed_lines(*, prefix: str, stream, is_stderr: bool) -> None:
@@ -246,6 +349,20 @@ def main():
     )
 
     parser.add_argument(
+        "--verify-allow-delta",
+        type=int,
+        default=1000,
+        help="Allow expected_total and unique_id_count to differ by this amount before re-downloading (default: 1000)",
+    )
+
+    parser.add_argument(
+        "--max-redownload-attempts",
+        type=int,
+        default=2,
+        help="Max times to re-download a failing resource type (default: 2)",
+    )
+
+    parser.add_argument(
         "--cms-url",
         default=None,
         help="Override CMS FHIR server URL (default: https://dev.cnpd.internal.cms.gov/fhir/)"
@@ -296,6 +413,7 @@ def main():
     print(f"FHIR Server:    {fhir_url}")
     print(f"Output Dir:     {output_dir}")
     print(f"Username:       {username}")
+    # Never print the real password.
     print(f"Password:       {'*' * len(password)}")
     print(f"Page Size:      {args.count}")
     if args.stop_after_this_many:
@@ -305,40 +423,86 @@ def main():
     print("=" * 80)
     print()
 
-    # Parse resource types and run one subprocess per resource type in parallel.
+    # Parse resource types.
     resource_types = _parse_resource_types(args.resource_types)
 
-    cmds: dict[str, list[str]] = {}
-    for rt in resource_types:
-        cmds[rt] = _build_create_ndjson_cmd(
-            fhir_url=fhir_url,
-            output_dir=output_dir,
-            count=int(args.count),
-            stop_after_this_many=args.stop_after_this_many,
-            resource_type=rt,
-        )
-
-    print("Executing download commands (parallel, one per resource type):")
-    for rt in resource_types:
-        print(f"  [{rt}] " + " ".join(cmds[rt]))
+    print("Executing download commands (serial, one resource type at a time):")
+    print("(Each type is verified after download; only failing types are re-downloaded.)")
     print("\n" + "=" * 80)
     print()
 
     results: dict[str, int] = {}
+    verify_summaries: dict[str, dict[str, str]] = {}
     try:
-        # You asked for one thread per object type every time.
-        with ThreadPoolExecutor(max_workers=len(resource_types) or 1) as ex:
-            futs = {
-                ex.submit(_run_one_resource_type, resource_type=rt, cmd=cmds[rt]): rt
-                for rt in resource_types
-            }
-            for fut in as_completed(futs):
-                rt = futs[fut]
-                try:
-                    results[rt] = int(fut.result())
-                except Exception as ex2:  # noqa: BLE001
-                    print(f"[{rt}][ERR] ERROR: worker crashed: {type(ex2).__name__}: {ex2}")
-                    results[rt] = 99
+        for rt in resource_types:
+            # Skip download if file already exists and verifies.
+            ndjson_path = output_dir / _snake_file_name(rt)
+
+            def _download_once() -> int:
+                cmd = _build_create_ndjson_cmd(
+                    fhir_url=fhir_url,
+                    output_dir=output_dir,
+                    count=int(args.count),
+                    stop_after_this_many=args.stop_after_this_many,
+                    resource_type=rt,
+                )
+                print(f"\n[{rt}] Download command: " + " ".join(cmd))
+                return int(_run_one_resource_type(resource_type=rt, cmd=cmd))
+
+            # Verify first if a file exists.
+            if ndjson_path.exists() and ndjson_path.stat().st_size > 0:
+                v_rc, v_fields = _run_verify_one_resource_type(
+                    resource_type=rt,
+                    ndjson_dir=output_dir,
+                    fhir_url=fhir_url,
+                    allow_delta=int(args.verify_allow_delta),
+                )
+                verify_summaries[rt] = v_fields
+                if v_rc == 0 and v_fields.get("status") == "PASS":
+                    print(f"[{rt}] Already verified - skipping download.")
+                    results[rt] = 0
+                    continue
+
+            # Download + verify loop.
+            max_attempts = max(int(args.max_redownload_attempts), 0) + 1
+            last_rc = 99
+            last_v_rc = 2
+            last_v_fields: dict[str, str] = {}
+            for attempt in range(1, max_attempts + 1):
+                print(f"[{rt}] Download attempt {attempt}/{max_attempts}...")
+                if attempt > 1:
+                    print(f"[{rt}] Resetting local download state before fresh re-download...")
+                    _reset_resource_download_state(output_dir=output_dir, resource_type=rt)
+                last_rc = _download_once()
+                if last_rc != 0:
+                    print(f"[{rt}][ERR] download subprocess failed rc={last_rc}")
+
+                last_v_rc, last_v_fields = _run_verify_one_resource_type(
+                    resource_type=rt,
+                    ndjson_dir=output_dir,
+                    fhir_url=fhir_url,
+                    allow_delta=int(args.verify_allow_delta),
+                )
+                verify_summaries[rt] = last_v_fields
+
+                if last_v_rc == 0 and last_v_fields.get("status") == "PASS":
+                    print(f"[{rt}] Verified PASS.")
+                    results[rt] = 0
+                    break
+
+                # Re-download is needed if verification did not PASS.
+                # (Verifier already encodes the delta threshold via --allow-delta,
+                # so FAIL means delta > allow-delta or integrity errors.)
+                redownload_needed = True
+
+                if attempt >= max_attempts:
+                    results[rt] = 2
+                    break
+
+                if redownload_needed:
+                    print(f"[{rt}] Verification failed - re-downloading...")
+
+            # end attempt loop
     except KeyboardInterrupt:
         print("\nInterrupted (Ctrl+C). Terminating running downloads...")
         _terminate_running_processes()
@@ -348,12 +512,19 @@ def main():
     failed = {rt: rc for rt, rc in results.items() if rc != 0}
 
     print("\n" + "=" * 80)
-    print("Parallel download summary")
+    print("Download + verify summary")
     print("=" * 80)
     for rt in resource_types:
         rc = results.get(rt, 99)
         status = "OK" if rc == 0 else f"FAILED(rc={rc})"
         print(f"{rt:24s} {status}")
+
+        vf = verify_summaries.get(rt) or {}
+        if vf:
+            v_status = vf.get("status")
+            v_delta = vf.get("delta")
+            if v_status or v_delta:
+                print(f"{'':24s} verify_status={v_status} delta={v_delta}")
 
     if not failed:
         print("\n" + "=" * 80)
