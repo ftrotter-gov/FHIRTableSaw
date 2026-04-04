@@ -104,6 +104,10 @@ def _now_iso() -> str:
     return time.strftime("%Y%m%dT%H%M%S", time.localtime())
 
 
+def _today_for_log_file() -> str:
+    return time.strftime("%Y_%m_%d", time.localtime())
+
+
 def _get_basic_auth_from_env() -> tuple[str, str]:
     """Return (username, password) using preferred env var names."""
 
@@ -206,10 +210,29 @@ class RetryConfig:
     # Number of attempts per request (initial try + retries).
     retries: int = 6
     backoff_seconds: float = 0.5
-    # Initial per-request timeout. On each failed attempt within a single request,
-    # the timeout doubles (2m, 4m, 8m, ...). Each new request starts back at the
-    # initial timeout.
+    # Initial per-request timeout.
     timeout_seconds: float = 120.0
+    # Maximum timeout used for retries of a *single* request.
+    #
+    # Why: unbounded exponential timeout growth can make the downloader appear to
+    # "slow down" over time as a few transient failures cause individual requests
+    # to wait for very long timeouts.
+    #
+    # Default behavior: cap == initial timeout (i.e., no exponential timeout growth).
+    timeout_max_seconds: float = 120.0
+
+
+def _normalize_timeout_max(*, timeout_seconds: float, timeout_max_seconds: float | None) -> float:
+    """Return an effective timeout cap.
+
+    - If timeout_max_seconds is None: cap to the initial timeout.
+    - If provided: never allow a max less than the initial timeout.
+    """
+
+    base = float(timeout_seconds)
+    if timeout_max_seconds is None:
+        return base
+    return max(base, float(timeout_max_seconds))
 
 
 @dataclass(frozen=True)
@@ -634,9 +657,9 @@ def _request_with_retry(
     curl_auth: tuple[str, str] | None,
 ) -> httpx.Response:
     last_exc: Exception | None = None
-    # Start each request with the configured initial timeout. If we retry this
-    # request, we exponentially increase the timeout. The next request (next page)
-    # resets back to retry.timeout_seconds.
+    # Start each request with the configured initial timeout. On retries we may
+    # increase the timeout, but we cap it to retry.timeout_max_seconds to avoid
+    # very long waits.
     timeout = float(retry.timeout_seconds)
     for attempt in range(1, max(retry.retries, 1) + 1):
         try:
@@ -690,8 +713,8 @@ def _request_with_retry(
                 if attempt >= retry.retries:
                     raise
 
-                # Increase timeout for the next retry attempt.
-                timeout = timeout * 2
+                # Increase timeout for the next retry attempt (bounded).
+                timeout = min(timeout * 2, float(retry.timeout_max_seconds))
                 if retry_after is not None:
                     time.sleep(min(retry_after, 120.0))
                 else:
@@ -758,8 +781,8 @@ def _request_with_retry(
             if attempt >= retry.retries:
                 raise
 
-            # Increase timeout for the next retry attempt.
-            timeout = timeout * 2
+            # Increase timeout for the next retry attempt (bounded).
+            timeout = min(timeout * 2, float(retry.timeout_max_seconds))
             _sleep_backoff(retry.backoff_seconds, attempt)
             continue
         except Exception as ex:  # noqa: BLE001
@@ -775,10 +798,8 @@ def _request_with_retry(
 
 
 def _make_failure_logger(*, log_dir: Path, resource_type: str):
-    safe_type = _safe_path_component(resource_type)
-    out_dir = log_dir / safe_type
-    out_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = out_dir / "failures.jsonl"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = log_dir / f"{resource_type}.fail.{_today_for_log_file()}.jsonl"
 
     def _log(event: dict[str, Any]) -> None:
         event = {"ts": _now_iso(), **event}
@@ -1021,6 +1042,15 @@ def fetch_resources(
         if hard_limit_reached or not next_url:
             return
 
+        # The caller commits the yielded page and persists the exact next URL.
+        # Reload state here so the next loop iteration follows the server-provided
+        # cursor instead of repeating the same request.
+        state = _load_or_init_resource_state(
+            output_dir=output_dir,
+            resource_type=resource_type,
+            count=count,
+        )
+
 
 def export_ndjson(
     *,
@@ -1202,8 +1232,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=120.0,
         help=(
-            "Initial request timeout seconds. Each retry attempt doubles the timeout. "
-            "Each new request resets back to this initial timeout. Default: 120"
+            "Initial request timeout seconds. Default: 120. "
+            "(See also: --timeout-max to cap any retry-timeout growth.)"
+        ),
+    )
+    p.add_argument(
+        "--timeout-max",
+        type=float,
+        default=None,
+        help=(
+            "Maximum request timeout seconds used during retries of a single request. "
+            "Default: equal to --timeout (no exponential timeout growth)."
         ),
     )
     p.add_argument(
@@ -1257,6 +1296,10 @@ def main(argv: list[str] | None = None) -> int:
         retries=int(args.retries),
         backoff_seconds=float(args.backoff),
         timeout_seconds=float(args.timeout),
+        timeout_max_seconds=_normalize_timeout_max(
+            timeout_seconds=float(args.timeout),
+            timeout_max_seconds=(float(args.timeout_max) if args.timeout_max is not None else None),
+        ),
     )
 
     url_print = UrlPrintConfig(print_urls=bool(args.print_urls))

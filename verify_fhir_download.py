@@ -96,6 +96,7 @@ def _get_json_with_retries(
     """
 
     timeout = float(initial_timeout_seconds)
+    timeout_cap = float(initial_timeout_seconds)
     last_error: str | None = None
 
     for attempt in range(1, max(int(max_attempts), 1) + 1):
@@ -110,7 +111,7 @@ def _get_json_with_retries(
             last_error = f"{type(ex).__name__}: {ex}"
             if attempt >= max_attempts:
                 break
-            next_timeout = timeout * 2
+            next_timeout = min(timeout * 2, timeout_cap)
             print(
                 f"WARN: count request failed for {resource_type} (attempt {attempt}/{max_attempts}, timeout={timeout:.0f}s) "
                 f"url={count_url} error={last_error} -> retrying with timeout={next_timeout:.0f}s",

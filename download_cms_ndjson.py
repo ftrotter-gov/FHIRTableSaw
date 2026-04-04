@@ -315,8 +315,13 @@ def _terminate_running_processes() -> None:
                 pass
 
 
-def main():
-    """Main entry point."""
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser.
+
+    Kept as a separate function so we can unit test defaults/flags without
+    invoking network/download behavior.
+    """
+
     parser = argparse.ArgumentParser(
         prog="download_cms_ndjson.py",
         description="Download FHIR resources from CMS API to NDJSON files",
@@ -352,14 +357,20 @@ def main():
         "--verify-allow-delta",
         type=int,
         default=1000,
-        help="Allow expected_total and unique_id_count to differ by this amount before re-downloading (default: 1000)",
+        help=(
+            "Allow expected_total and unique_id_count to differ by this amount before marking verification as FAIL "
+            "(default: 1000)"
+        ),
     )
 
     parser.add_argument(
         "--max-redownload-attempts",
         type=int,
-        default=2,
-        help="Max times to re-download a failing resource type (default: 2)",
+        default=0,
+        help=(
+            "Max times to re-download a failing resource type (default: 0). "
+            "NOTE: re-download is destructive (it deletes local download_state and overwrites the NDJSON)."
+        ),
     )
 
     parser.add_argument(
@@ -368,7 +379,14 @@ def main():
         help="Override CMS FHIR server URL (default: https://dev.cnpd.internal.cms.gov/fhir/)"
     )
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main entry point."""
+
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
 
     # Load environment variables from .env
     load_dotenv(override=True)
@@ -427,13 +445,19 @@ def main():
     resource_types = _parse_resource_types(args.resource_types)
 
     print("Executing download commands (serial, one resource type at a time):")
-    print("(Each type is verified after download; only failing types are re-downloaded.)")
+    print(
+        "(Each type is verified after download; failing types are NOT re-downloaded by default. "
+        "To enable destructive re-downloads, pass --max-redownload-attempts >= 1.)"
+    )
     print("\n" + "=" * 80)
     print()
 
     results: dict[str, int] = {}
     verify_summaries: dict[str, dict[str, str]] = {}
     try:
+        extra_redownload_attempts = max(int(args.max_redownload_attempts), 0)
+        allow_redownload = extra_redownload_attempts > 0
+
         for rt in resource_types:
             # Skip download if file already exists and verifies.
             ndjson_path = output_dir / _snake_file_name(rt)
@@ -463,8 +487,20 @@ def main():
                     results[rt] = 0
                     continue
 
+                # Existing file failed verification.
+                # IMPORTANT: do NOT auto-redownload or delete the (possibly mostly-correct)
+                # local download unless the operator explicitly enabled it.
+                if not allow_redownload:
+                    print(
+                        f"[{rt}] Existing NDJSON failed verification. "
+                        "Leaving current file/state intact and moving on to the next resource type. "
+                        "To force a fresh download, re-run with --max-redownload-attempts 1 (or more)."
+                    )
+                    results[rt] = 2
+                    continue
+
             # Download + verify loop.
-            max_attempts = max(int(args.max_redownload_attempts), 0) + 1
+            max_attempts = extra_redownload_attempts + 1
             last_rc = 99
             last_v_rc = 2
             last_v_fields: dict[str, str] = {}
@@ -500,7 +536,10 @@ def main():
                     break
 
                 if redownload_needed:
-                    print(f"[{rt}] Verification failed - re-downloading...")
+                    print(
+                        f"[{rt}] Verification failed. "
+                        f"Re-downloading is enabled; will try again (remaining attempts: {max_attempts - attempt})."
+                    )
 
             # end attempt loop
     except KeyboardInterrupt:
@@ -545,7 +584,7 @@ def main():
         print("=" * 80)
         # Return the first failure code (deterministic order).
         first_rt = sorted(failed.keys())[0]
-        sys.exit(int(failed[first_rt]))
+        return int(failed[first_rt])
 
     return 0
 

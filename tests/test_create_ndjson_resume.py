@@ -132,3 +132,69 @@ def test_sync_output_from_pages_repairs_partial_output_file(tmp_path):
     assert output_path.read_text(encoding="utf-8") == page_contents
     assert repaired.assembled_pages == 1
     assert repaired.assembled_bytes == len(page_contents.encode("utf-8"))
+
+
+def test_fetch_resources_uses_saved_next_url_after_page_commit(tmp_path, monkeypatch):
+    m = _load_create_ndjson_module()
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+            self.headers = {"Content-Type": "application/fhir+json"}
+
+        def json(self):
+            return self._payload
+
+    request_urls: list[str] = []
+
+    def fake_request_with_retry(client, method, url, *, params, retry, log_fn, context, curl_debug, curl_auth):
+        request_urls.append(str(url))
+        if len(request_urls) == 1:
+            return _FakeResponse(
+                {
+                    "resourceType": "Bundle",
+                    "entry": [{"resource": {"resourceType": "Practitioner", "id": "p1"}}],
+                    "link": [{"relation": "next", "url": "https://example.test/fhir/Practitioner?_getpages=abc&_getpagesoffset=1000"}],
+                }
+            )
+        if len(request_urls) == 2:
+            assert str(url) == "https://example.test/fhir/Practitioner?_getpages=abc&_getpagesoffset=1000"
+            return _FakeResponse(
+                {
+                    "resourceType": "Bundle",
+                    "entry": [{"resource": {"resourceType": "Practitioner", "id": "p2"}}],
+                }
+            )
+        raise AssertionError("unexpected extra request")
+
+    monkeypatch.setattr(m, "_request_with_retry", fake_request_with_retry)
+
+    state = m._load_or_init_resource_state(output_dir=tmp_path, resource_type="Practitioner", count=1000)
+    pages = m.fetch_resources(
+        client=object(),
+        output_dir=tmp_path,
+        resource_type="Practitioner",
+        count=1000,
+        hard_limit=None,
+        retry=m.RetryConfig(),
+        log_dir=tmp_path / "log",
+        url_print=m.UrlPrintConfig(print_urls=False),
+        curl_debug=m.CurlDebugConfig(curl_on_error=False),
+        curl_auth=None,
+    )
+
+    first_page = next(pages)
+    state = m._commit_download_page(
+        output_dir=tmp_path,
+        state=state,
+        page=first_page,
+        hard_limit_reached=False,
+    )
+
+    second_page = next(pages)
+    assert second_page.resources[0]["id"] == "p2"
+    assert request_urls == [
+        "Practitioner",
+        "https://example.test/fhir/Practitioner?_getpages=abc&_getpagesoffset=1000",
+    ]
