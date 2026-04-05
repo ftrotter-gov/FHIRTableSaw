@@ -5,9 +5,9 @@
 //
 // Typical usage:
 //
-//	go run fasttools/categorize_ndjson.go ./some_file.ndjson
-//	go run fasttools/categorize_ndjson.go ./dir_with_ndjson_files
-//	cat some_file.ndjson | go run fasttools/categorize_ndjson.go -
+//	go run ./cmd/categorize_ndjson -- ./some_file.ndjson
+//	go run ./cmd/categorize_ndjson -- ./dir_with_ndjson_files
+//	cat some_file.ndjson | go run ./cmd/categorize_ndjson -- -
 //
 // Notes:
 //   - Each line is expected to be a single FHIR resource JSON object (Bulk Export style).
@@ -72,7 +72,6 @@ func main() {
 		args = []string{"-"}
 	}
 
-	// Expand args into an ordered list of inputs.
 	inputs, err := expandInputs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -98,7 +97,6 @@ func main() {
 		}
 		fmt.Fprintf(os.Stdout, "FILE\t%s\n", in)
 
-		// New counts per input.
 		c = newCounts()
 		if err := processInput(in, c, opts); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
@@ -155,7 +153,6 @@ func expandInputs(args []string) ([]string, error) {
 		}
 	}
 
-	// Keep deterministic ordering, especially when walking directories.
 	sort.Strings(out)
 	return out, nil
 }
@@ -220,8 +217,6 @@ func processInput(path string, c *counts, opts options) error {
 		defer func() { _ = closer.Close() }()
 	}
 
-	// bufio.Scanner is fast and low allocation, but we must increase its token limit.
-	// FHIR resources can be large (especially with large extensions).
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 256*1024), 50*1024*1024) // up to 50MB per line
 
@@ -237,7 +232,6 @@ func processInput(path string, c *counts, opts options) error {
 			maybePrintProgress(os.Stderr, displayPath(path), lineNum, expectedLines, &lastProgressAt)
 		}
 
-		// Skip empty/whitespace-only lines.
 		if len(bytesTrimSpace(line)) == 0 {
 			c.emptyLines++
 			continue
@@ -258,7 +252,6 @@ func processInput(path string, c *counts, opts options) error {
 		c.byType[h.ResourceType]++
 	}
 	if err := scanner.Err(); err != nil {
-		// Commonly means a line exceeded our max token size.
 		return fmt.Errorf("%s: scan error: %w", displayPath(path), err)
 	}
 	if opts.progress {
@@ -268,7 +261,6 @@ func processInput(path string, c *counts, opts options) error {
 }
 
 func maybePrintProgress(w io.Writer, label string, current uint64, expected *uint64, lastAt *time.Time) {
-	// Keep progress updates cheap and avoid spamming stderr.
 	if current%1000 != 0 && time.Since(*lastAt) < 200*time.Millisecond {
 		return
 	}
@@ -293,10 +285,8 @@ func maybePrintProgress(w io.Writer, label string, current uint64, expected *uin
 }
 
 func printProgressDone(w io.Writer, label string, current uint64, expected *uint64) {
-	// Print a final 100% line and newline so subsequent stderr prints don't overwrite.
 	if expected != nil && *expected > 0 {
 		t := time.Time{}
-		// Print one last progress line (even if current != expected).
 		maybePrintProgress(w, label, current, expected, &t)
 	} else {
 		fmt.Fprintf(w, "\r%s: %d lines", label, current)
@@ -304,8 +294,6 @@ func printProgressDone(w io.Writer, label string, current uint64, expected *uint
 	fmt.Fprintln(w)
 }
 
-// countLines is a quick, streaming line counter (similar to `wc -l`).
-// For gzip files it counts lines in the decompressed stream.
 func countLinesAndMD5(path string) (uint64, string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -319,10 +307,6 @@ func countLinesAndMD5(path string) (uint64, string, error) {
 	var sawAny bool
 	var lastByte byte
 	isGzip := strings.HasSuffix(strings.ToLower(path), ".gz")
-
-	// Pass 1:
-	//   * always compute md5 over the raw file bytes
-	//   * for non-gzip inputs, also count lines in this same pass
 
 	for {
 		n, readErr := f.Read(buf)
@@ -349,7 +333,6 @@ func countLinesAndMD5(path string) (uint64, string, error) {
 	md5Hex := hex.EncodeToString(h.Sum(nil))
 
 	if isGzip {
-		// Pass 2: count lines in the decompressed stream.
 		if _, err := f.Seek(0, 0); err != nil {
 			return 0, "", err
 		}
@@ -382,7 +365,6 @@ func countLinesAndMD5(path string) (uint64, string, error) {
 		}
 	}
 
-	// If the last line doesn't end with a newline, still count it.
 	if sawAny && lastByte != '\n' {
 		lines++
 	}
@@ -473,7 +455,6 @@ func displayPath(p string) string {
 	return p
 }
 
-// bytesTrimSpace is a tiny helper to avoid converting []byte->string for TrimSpace.
 func bytesTrimSpace(b []byte) []byte {
 	start := 0
 	end := len(b)

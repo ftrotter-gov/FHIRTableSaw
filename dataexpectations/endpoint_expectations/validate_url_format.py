@@ -9,6 +9,8 @@ exchange. This test checks for: http instead of https, missing/malformed
 paths, invalid domain names, placeholder text, and empty addresses.
 A high rate of malformed URLs indicates poor source data quality or
 broken URL normalization logic in the data processing pipeline.
+
+TODO: this should be replaced by the use of the https://github.com/TransparentHealth/inspectorfhir
 """
 import re
 from urllib.parse import urlparse

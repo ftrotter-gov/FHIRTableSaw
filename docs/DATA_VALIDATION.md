@@ -68,18 +68,18 @@ from src.utils.dbtable import DBTable
 
 class ValidateActiveStatus(InLaw):
     title = "Active field should be boolean"
-    
+
     @staticmethod
     def run(engine, config=None):
         if config is None:
             return "SKIPPED: No config provided"
-        
+
         # Build table reference
         practitioner_DBTable = DBTable(
             schema=config['schema'],
             table=config['practitioner_table']
         )
-        
+
         # Query for invalid active values
         sql = f"""
             SELECT COUNT(*) AS invalid_active_count
@@ -88,14 +88,14 @@ class ValidateActiveStatus(InLaw):
                OR active IS NULL
         """
         gx_df = InLaw.to_gx_dataframe(sql, engine)
-        
+
         # Validate
         result = gx_df.expect_column_values_to_be_between(
             column="invalid_active_count",
             min_value=0,
             max_value=0
         )
-        
+
         if result.success:
             return True
         return "Found practitioners with invalid active status"
@@ -136,25 +136,25 @@ from src.utils.inlaw import InLaw
 
 def main():
     load_dotenv()
-    
+
     engine = create_engine_with_schema(
         db_url=get_db_url(),
         schema=get_db_schema()
     )
-    
+
     config = {
         'schema': get_db_schema(),
         'organization_table': 'organizations',
         'min_expected_rows': 1,
         'max_expected_rows': 10000000,
     }
-    
+
     results = InLaw.run_all(
         engine=engine,
         inlaw_dir=str(Path(__file__).parent),
         config=config
     )
-    
+
     sys.exit(0 if results['failed'] == 0 and results['errors'] == 0 else 1)
 
 
@@ -208,7 +208,50 @@ Add validation tests to your CI/CD pipeline:
     export DATABASE_URL=${{ secrets.DATABASE_URL }}
     export DB_SCHEMA=fhir_tablesaw
     python dataexpectations/practitioner_expectations/run_expectations.py
+
 ```
+
+## Verifying that an NDJSON download is complete
+
+If you have downloaded raw FHIR resources to `*.ndjson` files (for example using
+`download_cms_ndjson.py` / `create_ndjson_from_api.py`), you can do a quick
+integrity + completeness check against the source FHIR server.
+
+This answers:
+
+* Are all NDJSON lines parseable JSON?
+* Are there duplicate resource ids (often caused by paging issues)?
+* Does `unique(id)` match what the server reports via `?_summary=count` (with fallbacks
+  for CMS-like servers)?
+
+Run:
+
+```bash
+# directory first, fhir base url second
+python verify_fhir_download.py /path/to/download_dir https://dev.cnpd.internal.cms.gov/fhir/
+```
+
+The verifier retries each API "count" URL up to **6 times**. The first attempt uses
+`--timeout` seconds (default: 120s), and after each failed attempt the timeout doubles.
+
+By default it writes a CSV report to:
+
+* `<download_dir>/verify_fhir_download_report.csv`
+
+You can override that location with `--csv-out /path/to/report.csv`.
+
+The CSV is intentionally minimal and contains exactly:
+
+* `fhir_resource_type`
+* `resource_id_count_from_file` (unique `resource.id` values found in the NDJSON file)
+* `resource_id_count_from_url` (server-reported total via `?_summary=count` / fallback)
+
+The script reads Basic Auth credentials from `.env` using:
+
+* `FHIR_API_USERNAME`
+* `FHIR_API_PASSWORD`
+
+It exits non-zero on any mismatch.
 
 ## Troubleshooting
 

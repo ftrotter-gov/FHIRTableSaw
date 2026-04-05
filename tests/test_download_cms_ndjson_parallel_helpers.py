@@ -45,3 +45,12 @@ def test_build_create_ndjson_cmd_single_resource_type():
     assert cmd[cmd.index("--resource-types") + 1] == "Practitioner"
     assert "--stop-after-this-many" in cmd
     assert cmd[cmd.index("--stop-after-this-many") + 1] == "456"
+
+
+def test_max_redownload_attempts_default_is_zero():
+    m = _load_download_cms_ndjson_module()
+
+    p = m.build_arg_parser()
+    args = p.parse_args(["/tmp/out"])
+
+    assert args.max_redownload_attempts == 0
