@@ -231,3 +231,4 @@ evidence/*.options.yaml
 # Evidence connection configuration (contains credentials)
 evidence/sources/*/*connection*yaml
 evidence/static_site_content/*
+magid_test.sh
