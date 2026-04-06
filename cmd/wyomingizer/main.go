@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ftrotter-gov/FHIRTableSaw/fasttools"
+	"github.com/DSACMS/FHIRTableSaw/fasttools"
 )
 
 func main() {
@@ -39,10 +39,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Fprintf(os.Stderr, "states=%s wrote Location=%d Organization=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d invalid_json=%d\n",
+	fmt.Fprintf(os.Stderr, "states=%s wrote Location=%d Organization=%d Practitioner=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d invalid_json=%d\n",
 		st.StatesKey,
 		st.LocationsWritten,
 		st.OrganizationsWritten,
+		st.PractitionersWritten,
 		st.PractitionerRolesWritten,
 		st.OrganizationAffiliationsWritten,
 		st.EndpointsWritten,

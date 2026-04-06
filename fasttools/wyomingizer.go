@@ -17,6 +17,7 @@ import (
 // This intentionally supports only a small set of resource types for now:
 //   - Location
 //   - Organization
+//   - Practitioner
 //   - OrganizationAffiliation
 //   - PractitionerRole
 //   - Endpoint
@@ -40,6 +41,7 @@ type WyomingizeStats struct {
 
 	LocationsWritten                uint64
 	OrganizationsWritten            uint64
+	PractitionersWritten            uint64
 	OrganizationAffiliationsWritten uint64
 	PractitionerRolesWritten        uint64
 	EndpointsWritten                uint64
@@ -48,17 +50,14 @@ type WyomingizeStats struct {
 
 // Wyomingize reads NDJSON shards in opts.InputDir and writes a smaller subset to opts.OutputDir.
 //
-// The selection rules are intentionally bounded:
+// The selection rules are strict (Wyoming-only):
 //  1. Seed Locations whose Location.address.state is in opts.States.
-//  2. Include Organizations / PractitionerRoles / OrganizationAffiliations that reference
-//     any seeded Location.
-//  3. Include one more hop:
-//     - Organizations referenced by included PractitionerRoles/OrganizationAffiliations
-//     - Endpoints referenced by any included Organization or PractitionerRole
-//  4. “Bridge completion”:
-//     - Include any PractitionerRole/OrganizationAffiliation that references any included
-//     Organization (even if it does not reference a seeded Location).
-//     - This does NOT further expand the graph.
+//  2. Seed Organizations whose Organization.address[].state is in opts.States.
+//  3. Seed Practitioners whose Practitioner.address[].state is in opts.States.
+//  4. Include connecting resources:
+//     - PractitionerRoles that reference seeded Practitioners, Organizations, or Locations
+//     - OrganizationAffiliations that reference seeded Organizations or Locations
+//     - Endpoints that reference seeded Organizations or are referenced by included resources
 func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	var st WyomingizeStats
 
@@ -92,10 +91,10 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 
 	locationIDs := makeStringSet(1024)
 	orgIDs := makeStringSet(1024)
+	practitionerIDs := makeStringSet(1024)
 	roleIDs := makeStringSet(1024)
 	affIDs := makeStringSet(1024)
 	endpointIDs := makeStringSet(1024)
-	orgSecondHopIDs := makeStringSet(1024)
 
 	// PASS 1: seed Locations by state.
 	if opts.Verbose {
@@ -122,212 +121,168 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 		}
 	}
 
-	// PASS 2: resources directly connected to seeded locations.
+	// PASS 2: seed Organizations and Practitioners by their own addresses.
 	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "pass2: selecting org/role/aff directly connected to %d locations\n", locationIDs.len())
+		fmt.Fprintf(os.Stderr, "pass2: seeding organizations and practitioners by address (%s)\n", statesKey)
 	}
 
 	for _, path := range inputs.organizations {
 		inv, err := scanFileLines(path, func(line []byte) error {
-			id, ok, err := parseID(line)
-			if err != nil || !ok {
-				return err
-			}
-			locRefs, err := extractRefIDsFromKeys(line, "Location", []string{"location"})
+			id, state, ok, err := parseOrganizationIDAndState(line)
 			if err != nil {
 				return err
 			}
-			if !anyInSet(locRefs, locationIDs) {
+			if !ok || !states[state] {
 				return nil
 			}
 			orgIDs.add(id)
 			if writers.organizations.WriteOnce(id, line) {
 				st.OrganizationsWritten++
 			}
-			endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
+			return nil
+		})
+		st.InvalidJSONLines += inv
+		if err != nil {
+			return st, fmt.Errorf("organizations address scan %s: %w", path, err)
+		}
+	}
+
+	for _, path := range inputs.practitioners {
+		inv, err := scanFileLines(path, func(line []byte) error {
+			id, state, ok, err := parsePractitionerIDAndState(line)
 			if err != nil {
 				return err
 			}
-			for _, eid := range endRefs {
-				endpointIDs.add(eid)
+			if !ok || !states[state] {
+				return nil
+			}
+			practitionerIDs.add(id)
+			if writers.practitioners.WriteOnce(id, line) {
+				st.PractitionersWritten++
 			}
 			return nil
 		})
 		st.InvalidJSONLines += inv
 		if err != nil {
-			return st, fmt.Errorf("organizations scan %s: %w", path, err)
+			return st, fmt.Errorf("practitioners address scan %s: %w", path, err)
 		}
 	}
 
-	for _, path := range inputs.practitionerRoles {
+	// PASS 3: find all connecting resources (strict connections only).
+	if opts.Verbose {
+		fmt.Fprintf(os.Stderr, "pass3: finding resources connected to %d locations, %d organizations, %d practitioners\n",
+			locationIDs.len(), orgIDs.len(), practitionerIDs.len())
+	}
+
+	// Organizations that reference seeded Locations or Practitioners
+	for _, path := range inputs.organizations {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, ok, err := parseID(line)
-			if err != nil || !ok {
+			if err != nil || !ok || orgIDs.has(id) {
 				return err
 			}
 			locRefs, err := extractRefIDsFromKeys(line, "Location", []string{"location"})
 			if err != nil {
 				return err
 			}
-			if !anyInSet(locRefs, locationIDs) {
-				return nil
-			}
-
-			roleIDs.add(id)
-			if writers.practitionerRoles.WriteOnce(id, line) {
-				st.PractitionerRolesWritten++
-			}
-
-			orgRefs, err := extractRefIDsFromKeys(line, "Organization", []string{"organization"})
-			if err != nil {
-				return err
-			}
-			for _, oid := range orgRefs {
-				orgSecondHopIDs.add(oid)
-			}
-
-			endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
-			if err != nil {
-				return err
-			}
-			for _, eid := range endRefs {
-				endpointIDs.add(eid)
-			}
-			return nil
-		})
-		st.InvalidJSONLines += inv
-		if err != nil {
-			return st, fmt.Errorf("practitionerRole scan %s: %w", path, err)
-		}
-	}
-
-	affLocationKeys := []string{"location"}
-	for _, path := range inputs.organizationAffiliations {
-		inv, err := scanFileLines(path, func(line []byte) error {
-			id, ok, err := parseID(line)
-			if err != nil || !ok {
-				return err
-			}
-			locRefs, err := extractRefIDsFromKeys(line, "Location", affLocationKeys)
-			if err != nil {
-				return err
-			}
-			if !anyInSet(locRefs, locationIDs) {
-				return nil
-			}
-
-			affIDs.add(id)
-			if writers.organizationAffiliations.WriteOnce(id, line) {
-				st.OrganizationAffiliationsWritten++
-			}
-
-			orgRefs, err := extractRefIDsFromKeys(line, "Organization", []string{"organization", "participatingOrganization"})
-			if err != nil {
-				return err
-			}
-			for _, oid := range orgRefs {
-				orgSecondHopIDs.add(oid)
-			}
-			return nil
-		})
-		st.InvalidJSONLines += inv
-		if err != nil {
-			return st, fmt.Errorf("organizationAffiliation scan %s: %w", path, err)
-		}
-	}
-
-	// PASS 3: second hop orgs + bridge completion + endpoints.
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "pass3: adding %d second-hop organizations and completing bridge entities\n", orgSecondHopIDs.len())
-	}
-
-	for _, path := range inputs.organizations {
-		inv, err := scanFileLines(path, func(line []byte) error {
-			id, ok, err := parseID(line)
-			if err != nil || !ok {
-				return err
-			}
-			if !orgSecondHopIDs.has(id) {
-				return nil
-			}
-			if !orgIDs.has(id) {
+			if anyInSet(locRefs, locationIDs) {
 				orgIDs.add(id)
 				if writers.organizations.WriteOnce(id, line) {
 					st.OrganizationsWritten++
 				}
-			}
-			endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
-			if err != nil {
-				return err
-			}
-			for _, eid := range endRefs {
-				endpointIDs.add(eid)
+				endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
+				if err != nil {
+					return err
+				}
+				for _, eid := range endRefs {
+					endpointIDs.add(eid)
+				}
 			}
 			return nil
 		})
 		st.InvalidJSONLines += inv
 		if err != nil {
-			return st, fmt.Errorf("organizations hop2 scan %s: %w", path, err)
+			return st, fmt.Errorf("organizations connection scan %s: %w", path, err)
 		}
 	}
 
+	// PractitionerRoles that reference seeded Practitioners, Organizations, or Locations
 	for _, path := range inputs.practitionerRoles {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, ok, err := parseID(line)
 			if err != nil || !ok || roleIDs.has(id) {
 				return err
 			}
+
+			// Check if references seeded Practitioner, Organization, or Location
+			practRefs, err := extractRefIDsFromKeys(line, "Practitioner", []string{"practitioner"})
+			if err != nil {
+				return err
+			}
 			orgRefs, err := extractRefIDsFromKeys(line, "Organization", []string{"organization"})
 			if err != nil {
 				return err
 			}
-			if !anyInSet(orgRefs, orgIDs) {
-				return nil
-			}
-			roleIDs.add(id)
-			if writers.practitionerRoles.WriteOnce(id, line) {
-				st.PractitionerRolesWritten++
-			}
-			endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
+			locRefs, err := extractRefIDsFromKeys(line, "Location", []string{"location"})
 			if err != nil {
 				return err
 			}
-			for _, eid := range endRefs {
-				endpointIDs.add(eid)
+
+			if anyInSet(practRefs, practitionerIDs) || anyInSet(orgRefs, orgIDs) || anyInSet(locRefs, locationIDs) {
+				roleIDs.add(id)
+				if writers.practitionerRoles.WriteOnce(id, line) {
+					st.PractitionerRolesWritten++
+				}
+
+				endRefs, err := extractRefIDsFromKeys(line, "Endpoint", []string{"endpoint"})
+				if err != nil {
+					return err
+				}
+				for _, eid := range endRefs {
+					endpointIDs.add(eid)
+				}
 			}
 			return nil
 		})
 		st.InvalidJSONLines += inv
 		if err != nil {
-			return st, fmt.Errorf("practitionerRole bridge scan %s: %w", path, err)
+			return st, fmt.Errorf("practitionerRole connection scan %s: %w", path, err)
 		}
 	}
 
+	// OrganizationAffiliations that reference seeded Organizations or Locations
 	for _, path := range inputs.organizationAffiliations {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, ok, err := parseID(line)
 			if err != nil || !ok || affIDs.has(id) {
 				return err
 			}
+
+			// Check if references seeded Organizations or Locations
 			orgRefs, err := extractRefIDsFromKeys(line, "Organization", []string{"organization", "participatingOrganization"})
 			if err != nil {
 				return err
 			}
-			if !anyInSet(orgRefs, orgIDs) {
-				return nil
+			locRefs, err := extractRefIDsFromKeys(line, "Location", []string{"location"})
+			if err != nil {
+				return err
 			}
-			affIDs.add(id)
-			if writers.organizationAffiliations.WriteOnce(id, line) {
-				st.OrganizationAffiliationsWritten++
+
+			if anyInSet(orgRefs, orgIDs) || anyInSet(locRefs, locationIDs) {
+				affIDs.add(id)
+				if writers.organizationAffiliations.WriteOnce(id, line) {
+					st.OrganizationAffiliationsWritten++
+				}
 			}
 			return nil
 		})
 		st.InvalidJSONLines += inv
 		if err != nil {
-			return st, fmt.Errorf("organizationAffiliation bridge scan %s: %w", path, err)
+			return st, fmt.Errorf("organizationAffiliation connection scan %s: %w", path, err)
 		}
 	}
 
+	// Endpoints referenced by seeded Organizations or collected from other resources
 	for _, path := range inputs.endpoints {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, ok, err := parseID(line)
@@ -361,8 +316,8 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	}
 
 	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "done: wrote Location=%d Organization=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d (invalid_json=%d)\n",
-			st.LocationsWritten, st.OrganizationsWritten, st.PractitionerRolesWritten, st.OrganizationAffiliationsWritten, st.EndpointsWritten, st.InvalidJSONLines)
+		fmt.Fprintf(os.Stderr, "done: wrote Location=%d Organization=%d Practitioner=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d (invalid_json=%d)\n",
+			st.LocationsWritten, st.OrganizationsWritten, st.PractitionersWritten, st.PractitionerRolesWritten, st.OrganizationAffiliationsWritten, st.EndpointsWritten, st.InvalidJSONLines)
 	}
 	return st, nil
 }
@@ -370,6 +325,7 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 type inputFiles struct {
 	locations                []string
 	organizations            []string
+	practitioners            []string
 	organizationAffiliations []string
 	practitionerRoles        []string
 	endpoints                []string
@@ -383,6 +339,10 @@ func discoverInputs(inputDir string) (inputFiles, error) {
 		return out, err
 	}
 	out.organizations, err = findShardFiles(inputDir, "Organization")
+	if err != nil {
+		return out, err
+	}
+	out.practitioners, err = findShardFiles(inputDir, "Practitioner")
 	if err != nil {
 		return out, err
 	}
@@ -413,10 +373,11 @@ func findShardFiles(dir, prefix string) ([]string, error) {
 			continue
 		}
 		lower := strings.ToLower(e.Name())
-		if !strings.HasPrefix(lower, pfx) {
+		// ONLY process files ending in .ndjson (not .ndjson.gz or any other extension)
+		if !strings.HasSuffix(lower, ".ndjson") {
 			continue
 		}
-		if strings.HasSuffix(lower, ".gz") {
+		if !strings.HasPrefix(lower, pfx) {
 			continue
 		}
 		out = append(out, filepath.Join(dir, e.Name()))
@@ -434,7 +395,16 @@ func scanFileLines(path string, fn func(line []byte) error) (invalidJSON uint64,
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 256*1024), 50*1024*1024)
+	
+	var lineCount uint64
 	for scanner.Scan() {
+		lineCount++
+		
+		// Print progress dot every 100k lines
+		if lineCount%100000 == 0 {
+			fmt.Fprint(os.Stderr, ".")
+		}
+		
 		trimmed := bytesTrimSpace(scanner.Bytes())
 		if len(trimmed) == 0 {
 			continue
@@ -451,6 +421,12 @@ func scanFileLines(path string, fn func(line []byte) error) (invalidJSON uint64,
 	if err := scanner.Err(); err != nil {
 		return invalidJSON, err
 	}
+	
+	// Print newline after dots if we printed any
+	if lineCount >= 100000 {
+		fmt.Fprintln(os.Stderr)
+	}
+	
 	return invalidJSON, nil
 }
 
@@ -502,6 +478,76 @@ func parseLocationIDAndState(line []byte) (id string, state string, ok bool, err
 		}
 		return id, state, true, nil
 	}
+	var addrArr []struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(addrRaw, &addrArr); err != nil {
+		return "", "", false, nil
+	}
+	for _, a := range addrArr {
+		state = strings.ToUpper(strings.TrimSpace(a.State))
+		if state != "" {
+			return id, state, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+func parseOrganizationIDAndState(line []byte) (id string, state string, ok bool, err error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return "", "", false, err
+	}
+	if raw, ok := m["id"]; ok {
+		if err := json.Unmarshal(raw, &id); err != nil {
+			return "", "", false, err
+		}
+		id = strings.TrimSpace(id)
+	}
+	if id == "" {
+		return "", "", false, nil
+	}
+	addrRaw, ok := m["address"]
+	if !ok {
+		return "", "", false, nil
+	}
+
+	// Organization.address is an array
+	var addrArr []struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(addrRaw, &addrArr); err != nil {
+		return "", "", false, nil
+	}
+	for _, a := range addrArr {
+		state = strings.ToUpper(strings.TrimSpace(a.State))
+		if state != "" {
+			return id, state, true, nil
+		}
+	}
+	return "", "", false, nil
+}
+
+func parsePractitionerIDAndState(line []byte) (id string, state string, ok bool, err error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(line, &m); err != nil {
+		return "", "", false, err
+	}
+	if raw, ok := m["id"]; ok {
+		if err := json.Unmarshal(raw, &id); err != nil {
+			return "", "", false, err
+		}
+		id = strings.TrimSpace(id)
+	}
+	if id == "" {
+		return "", "", false, nil
+	}
+	addrRaw, ok := m["address"]
+	if !ok {
+		return "", "", false, nil
+	}
+
+	// Practitioner.address is an array
 	var addrArr []struct {
 		State string `json:"state"`
 	}
@@ -613,6 +659,7 @@ func parseReference(ref string, wantType string) (id string, ok bool) {
 type writers struct {
 	locations                *ndjsonWriter
 	organizations            *ndjsonWriter
+	practitioners            *ndjsonWriter
 	organizationAffiliations *ndjsonWriter
 	practitionerRoles        *ndjsonWriter
 	endpoints                *ndjsonWriter
@@ -633,16 +680,24 @@ func newWriters(outDir, statesKey string, overwrite bool) (*writers, error) {
 		_ = loc.Close()
 		return nil, err
 	}
+	pract, err := open("Practitioner")
+	if err != nil {
+		_ = loc.Close()
+		_ = org.Close()
+		return nil, err
+	}
 	aff, err := open("OrganizationAffiliation")
 	if err != nil {
 		_ = loc.Close()
 		_ = org.Close()
+		_ = pract.Close()
 		return nil, err
 	}
 	role, err := open("PractitionerRole")
 	if err != nil {
 		_ = loc.Close()
 		_ = org.Close()
+		_ = pract.Close()
 		_ = aff.Close()
 		return nil, err
 	}
@@ -650,18 +705,20 @@ func newWriters(outDir, statesKey string, overwrite bool) (*writers, error) {
 	if err != nil {
 		_ = loc.Close()
 		_ = org.Close()
+		_ = pract.Close()
 		_ = aff.Close()
 		_ = role.Close()
 		return nil, err
 	}
 
-	return &writers{locations: loc, organizations: org, organizationAffiliations: aff, practitionerRoles: role, endpoints: ep}, nil
+	return &writers{locations: loc, organizations: org, practitioners: pract, organizationAffiliations: aff, practitionerRoles: role, endpoints: ep}, nil
 }
 
 func (w *writers) Flush() error {
 	return errors.Join(
 		w.locations.Flush(),
 		w.organizations.Flush(),
+		w.practitioners.Flush(),
 		w.organizationAffiliations.Flush(),
 		w.practitionerRoles.Flush(),
 		w.endpoints.Flush(),
@@ -672,6 +729,7 @@ func (w *writers) Close() error {
 	return errors.Join(
 		w.locations.Close(),
 		w.organizations.Close(),
+		w.practitioners.Close(),
 		w.organizationAffiliations.Close(),
 		w.practitionerRoles.Close(),
 		w.endpoints.Close(),

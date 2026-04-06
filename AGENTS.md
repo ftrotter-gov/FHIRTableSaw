@@ -10,8 +10,12 @@ This document contains rules and guidelines for AI agents working on the FHIRTab
 * When you create initial password configuration files they should ALWAYS be added to gitignore.
 * In fact.. you should NEVER NEVER NEVER be writing passwords at all. Please let me do that part.
 * Always use snake_case without spaces, for column names on the relational model tables.
+* Do not attempt to write scripts that handle compressed files.
+* If I ask that you work on a specific type of file. Assume that the script should be working on only that type of file (usually ndjson files)
+
 
 ## Go compiling rules
 
 * Always compile to a file with an extension .gobin
 * Binaries with this name should be excluded from git using .gitignore
+
