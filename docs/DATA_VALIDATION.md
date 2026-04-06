@@ -217,6 +217,22 @@ If you have downloaded raw FHIR resources to `*.ndjson` files (for example using
 `download_cms_ndjson.py` / `create_ndjson_from_api.py`), you can do a quick
 integrity + completeness check against the source FHIR server.
 
+If you want to download just a single resource type from the CMS API, the repo
+root includes convenience runner scripts:
+
+```bash
+./runner_practitioner.sh
+./runner_practitioner_role.sh
+./runner_organization.sh
+./runner_organization_affiliation.sh
+./runner_endpoint.sh
+./runner_location.sh
+```
+
+Each runner accepts an optional first argument `output_dir` (defaults to
+`/Users/tgda/2026_03_31_cms_first_pass_ndjson/`), followed by any extra
+`download_cms_ndjson.py` flags.
+
 This answers:
 
 * Are all NDJSON lines parseable JSON?
