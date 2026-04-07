@@ -9,6 +9,7 @@ This directory contains individual Cypher query files extracted from the main Ty
 - **search_by_npi_one_hop.cypher** - Find a node by NPI and show direct connections
 - **search_by_npi_two_hops.cypher** - Find a node by NPI and show extended network (1-2 hops)
 - **search_by_npi_with_relationship_labels.cypher** - Find a node by NPI with relationship types visible
+- **search_by_npi_one_hop_two_for_bridge.cypher** - Find all nodes connected to an NPI, treating PractitionerRole and OrganizationAffiliation as transparent bridges
 
 ### Search by Endpoint
 
@@ -66,3 +67,4 @@ RETURN path;
 - **Use CONTAINS** for partial matching on text fields
 - **Always RETURN path** to show the relationships/links in the graph visualization
 - **View in Neo4j Browser** at <http://localhost:7474> for best graph visualization
+- **Use shortestPath()** to find how two entities are connected through the minimum number of hops
