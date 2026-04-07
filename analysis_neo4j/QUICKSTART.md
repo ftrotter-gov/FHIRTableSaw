@@ -127,13 +127,19 @@ python scripts/inspect_ndjson.py /path/to/Practitioner.ndjson 10
 
 ### "No NDJSON files found"
 
-Files must be named exactly:
-- `Practitioner.ndjson`
-- `PractitionerRole.ndjson`
-- `Organization.ndjson`
-- `OrganizationAffiliation.ndjson`
-- `Endpoint.ndjson`
-- `Location.ndjson`
+Files must start with the resource type name:
+- `Practitioner.ndjson` or `Practitioner.*.ndjson`
+- `PractitionerRole.ndjson` or `PractitionerRole.*.ndjson`
+- `Organization.ndjson` or `Organization.*.ndjson`
+- `OrganizationAffiliation.ndjson` or `OrganizationAffiliation.*.ndjson`
+- `Endpoint.ndjson` or `Endpoint.*.ndjson`
+- `Location.ndjson` or `Location.*.ndjson`
+
+### "Confusing filename detected"
+
+Avoid these ambiguous patterns:
+- `Practitioner.Role.ndjson` - Use `PractitionerRole.ndjson` instead
+- `Organization.Affiliation.ndjson` - Use `OrganizationAffiliation.ndjson` instead
 
 ## Next Steps
 

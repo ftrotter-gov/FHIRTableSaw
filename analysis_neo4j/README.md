@@ -108,12 +108,22 @@ ORDER BY count DESC;
 
 ### Filename Matching
 
-The import script uses **exact resource type matching** to prevent misclassification:
+The import script supports **wildcard filenames** while preventing misclassification:
 
-- `Organization.ndjson` → Organization nodes
-- `OrganizationAffiliation.ndjson` → OrganizationAffiliation nodes (NOT Organization)
-- `Practitioner.ndjson` → Practitioner nodes
-- `PractitionerRole.ndjson` → PractitionerRole nodes (NOT Practitioner)
+**Supported patterns:**
+- `Organization.ndjson` or `Organization.*.ndjson` → Organization nodes
+- `OrganizationAffiliation.ndjson` or `OrganizationAffiliation.*.ndjson` → OrganizationAffiliation nodes
+- `Practitioner.ndjson` or `Practitioner.*.ndjson` → Practitioner nodes
+- `PractitionerRole.ndjson` or `PractitionerRole.*.ndjson` → PractitionerRole nodes
+
+**Examples:**
+- `Practitioner.Wyoming.ndjson` → Practitioner
+- `Organization.Hospitals.ndjson` → Organization
+- `PractitionerRole.Active.ndjson` → PractitionerRole
+
+**ERRORS - Confusing patterns:**
+- `Practitioner.Role.ndjson` → ERROR (ambiguous - use `PractitionerRole.*.ndjson`)
+- `Organization.Affiliation.ndjson` → ERROR (ambiguous - use `OrganizationAffiliation.*.ndjson`)
 
 ### Idempotent Imports
 

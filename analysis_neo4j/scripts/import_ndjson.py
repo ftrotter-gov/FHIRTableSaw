@@ -18,6 +18,7 @@ import sys
 import argparse
 from pathlib import Path
 from typing import Dict, Type, List
+import glob
 
 # Import all resource importers
 from importers import (
@@ -46,11 +47,17 @@ def discover_ndjson_files(*, directory: Path) -> Dict[str, Path]:
     """
     Discover FHIR NDJSON files in the specified directory.
     
-    Uses EXACT filename matching to prevent misclassification:
+    Supports wildcard matching with confusing pattern detection:
     - Organization.ndjson matches Organization
-    - OrganizationAffiliation.ndjson matches OrganizationAffiliation (NOT Organization)
+    - Organization.Something.ndjson matches Organization
+    - OrganizationAffiliation.ndjson matches OrganizationAffiliation
     - Practitioner.ndjson matches Practitioner
-    - PractitionerRole.ndjson matches PractitionerRole (NOT Practitioner)
+    - Practitioner.Something.ndjson matches Practitioner
+    - PractitionerRole.ndjson matches PractitionerRole
+    
+    ERRORS on confusing patterns:
+    - Practitioner.Role.ndjson (ERROR - use PractitionerRole instead)
+    - Organization.Affiliation.ndjson (ERROR - use OrganizationAffiliation instead)
     
     Args:
         directory: Path to directory containing NDJSON files
@@ -68,13 +75,66 @@ def discover_ndjson_files(*, directory: Path) -> Dict[str, Path]:
         print(f"Error: Path is not a directory: {directory}")
         return discovered
     
-    # Look for files matching supported resource types
+    # Confusing patterns that should error
+    confusing_patterns = {
+        'Practitioner.Role': 'PractitionerRole',
+        'Organization.Affiliation': 'OrganizationAffiliation',
+    }
+    
+    # Check for confusing patterns first
+    for pattern, correct_name in confusing_patterns.items():
+        pattern_files = list(directory.glob(f"{pattern}.*.ndjson"))
+        if pattern_files:
+            for bad_file in pattern_files:
+                print(f"\n{'!'*60}")
+                print(f"ERROR: Confusing filename detected!")
+                print(f"File: {bad_file.name}")
+                print(f"This pattern is ambiguous. Please rename to:")
+                print(f"  {correct_name}.*.ndjson")
+                print(f"Example: {correct_name}.{bad_file.stem.split('.', 2)[-1]}.ndjson")
+                print(f"{'!'*60}\n")
+            sys.exit(1)
+    
+    # Look for files matching supported resource types with wildcards
     for resource_type in IMPORTER_MAP.keys():
-        # Try exact match: ResourceType.ndjson
-        filepath = directory / f"{resource_type}.ndjson"
-        if filepath.exists() and filepath.is_file():
-            discovered[resource_type] = filepath
-            print(f"Found: {resource_type} -> {filepath}")
+        # Use glob to find all files matching ResourceType.*.ndjson
+        pattern = f"{resource_type}.*.ndjson"
+        matching_files = list(directory.glob(pattern))
+        
+        # Also check for exact match: ResourceType.ndjson
+        exact_match = directory / f"{resource_type}.ndjson"
+        if exact_match.exists() and exact_match.is_file():
+            matching_files.insert(0, exact_match)
+        
+        # Filter out false matches
+        # For example, Organization.* should NOT match OrganizationAffiliation.*
+        valid_files = []
+        for filepath in matching_files:
+            filename = filepath.name
+            
+            # Check if this file actually starts with the exact resource type followed by . or end
+            if filename.startswith(f"{resource_type}."):
+                # Make sure it's not a longer resource type
+                # e.g., Organization.Something should match, but not OrganizationAffiliation.Something
+                after_type = filename[len(resource_type):]
+                
+                # Valid if it's .ndjson or .*.ndjson
+                if after_type == '.ndjson' or (after_type.startswith('.') and after_type.endswith('.ndjson')):
+                    # Additional check: ensure we're not matching a longer resource type
+                    # by checking that the next char after resource_type is indeed a '.'
+                    valid_files.append(filepath)
+        
+        # If we found multiple files for the same resource type, take the first one
+        # (exact match if exists, otherwise first wildcard match)
+        if valid_files:
+            chosen_file = valid_files[0]
+            discovered[resource_type] = chosen_file
+            print(f"Found: {resource_type} -> {chosen_file.name}")
+            
+            # Warn if multiple files match
+            if len(valid_files) > 1:
+                print(f"  Warning: Multiple files match {resource_type}, using {chosen_file.name}")
+                print(f"  Other matches: {[f.name for f in valid_files[1:]]}")
     
     return discovered
 
@@ -183,13 +243,22 @@ Examples:
   python import_ndjson.py /data/fhir
 
 File Naming:
-  Files must be named exactly as the resource type with .ndjson extension:
-  - Practitioner.ndjson
-  - PractitionerRole.ndjson
-  - Organization.ndjson
-  - OrganizationAffiliation.ndjson
-  - Endpoint.ndjson
-  - Location.ndjson
+  Files can be named with the resource type with .ndjson extension:
+  - Practitioner.ndjson or Practitioner.*.ndjson
+  - PractitionerRole.ndjson or PractitionerRole.*.ndjson
+  - Organization.ndjson or Organization.*.ndjson
+  - OrganizationAffiliation.ndjson or OrganizationAffiliation.*.ndjson
+  - Endpoint.ndjson or Endpoint.*.ndjson
+  - Location.ndjson or Location.*.ndjson
+  
+  Examples:
+  - Practitioner.Wyoming.ndjson
+  - Organization.Hospitals.ndjson
+  - PractitionerRole.Active.ndjson
+  
+  AVOID confusing patterns (will cause errors):
+  - Practitioner.Role.ndjson (use PractitionerRole.*.ndjson instead)
+  - Organization.Affiliation.ndjson (use OrganizationAffiliation.*.ndjson instead)
         """
     )
     
