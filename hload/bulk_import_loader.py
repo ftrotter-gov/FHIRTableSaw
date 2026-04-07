@@ -51,9 +51,15 @@ class BulkImportLoader:
         Returns:
             True if CLI is available, False otherwise
         """
+        # First check if command is in PATH using shutil.which
+        resolved_path = shutil.which(cli_path)
+        if resolved_path is None:
+            return False
+        
+        # Then verify it runs (hapi-fhir-cli uses 'help' not '--help')
         try:
             result = subprocess.run(
-                [cli_path, "--help"],
+                [cli_path, "help"],
                 capture_output=True,
                 timeout=10
             )
@@ -273,8 +279,19 @@ class BulkImportLoader:
                 if verbose:
                     print(f"  🔗 Created symlink: {symlink}")
                 
-                # Run bulk import
-                print(f"  ⏳ Running bulk import...")
+                # Run bulk import - ALWAYS show the command
+                command = [
+                    cli_path,
+                    "bulk-import",
+                    "-v", fhir_version,
+                    "--port", str(port),
+                    "--source-directory", str(temp_dir),
+                    "--target-base", target_url
+                ]
+                print(f"  🔧 Running command:")
+                print(f"     {' '.join(command)}")
+                print(f"  ⏳ Executing bulk import...")
+                
                 result = BulkImportLoader._run_bulk_import(
                     cli_path=cli_path,
                     temp_dir=temp_dir,
@@ -284,13 +301,17 @@ class BulkImportLoader:
                     verbose=verbose
                 )
                 
+                # Always show output
+                if result.stdout:
+                    print(f"\n  📋 Output:\n{result.stdout}")
+                if result.stderr:
+                    print(f"\n  ⚠️  Stderr:\n{result.stderr}")
+                
                 if result.returncode == 0:
                     print(f"  ✅ Successfully imported {resource_type}")
                     results[resource_type] = True
                 else:
-                    error_msg = result.stderr if result.stderr else result.stdout
-                    print(f"  ❌ Failed to import {resource_type}")
-                    print(f"     Error: {error_msg[:200]}")
+                    print(f"  ❌ Failed to import {resource_type} (exit code: {result.returncode})")
                     results[resource_type] = False
                     
                     if stop_on_error:

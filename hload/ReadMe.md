@@ -56,15 +56,7 @@ python hload/bulk_import_loader.py --help
    - Waits for completion
    - Cleans up temporary directory (unless `--no-cleanup` is specified)
 
-### load_from_dir.sh
-
-A bash script that loads FHIR resources using direct HTTP API calls (curl).
-
-**Usage:**
-
-```bash
-./hload/load_from_dir.sh /path/to/ndjson/files
-```
+## Supporting Scripts
 
 ### run_hapi_docker.sh
 
