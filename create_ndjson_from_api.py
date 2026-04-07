@@ -32,6 +32,7 @@ import subprocess
 import sys
 import time
 import traceback
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -273,6 +274,9 @@ class ResourceDownloadState:
     resources_written: int
     assembled_pages: int
     assembled_bytes: int
+    # Best-effort hint for the full resource total (from Bundle.total or wrapper count).
+    # Persisted so resumed downloads can make smarter decisions.
+    total_hint: int | None = None
     completed_at: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -288,6 +292,7 @@ class ResourceDownloadState:
             "resources_written": self.resources_written,
             "assembled_pages": self.assembled_pages,
             "assembled_bytes": self.assembled_bytes,
+            "total_hint": self.total_hint,
             "completed_at": self.completed_at,
         }
 
@@ -305,8 +310,75 @@ class ResourceDownloadState:
             resources_written=int(payload.get("resources_written", 0)),
             assembled_pages=int(payload.get("assembled_pages", 0)),
             assembled_bytes=int(payload.get("assembled_bytes", 0)),
+            total_hint=payload.get("total_hint"),
             completed_at=payload.get("completed_at"),
         )
+
+
+def _rewrite_url_query_param(url: str, *, key: str, value: str) -> str:
+    """Replace or add one query param in a possibly-absolute URL string."""
+
+    parts = urllib.parse.urlsplit(url)
+    q = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    found = False
+    new_q: list[tuple[str, str]] = []
+    for k, v in q:
+        if k == key:
+            new_q.append((k, value))
+            found = True
+        else:
+            new_q.append((k, v))
+    if not found:
+        new_q.append((key, value))
+    new_query = urllib.parse.urlencode(new_q)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
+def _url_has_any_param(url: str, *, keys: tuple[str, ...]) -> bool:
+    parts = urllib.parse.urlsplit(url)
+    q = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    present = {k for k, _ in q}
+    return any(k in present for k in keys)
+
+
+def _maybe_adjust_request_for_remaining(
+    *,
+    url: str,
+    params: dict[str, str] | None,
+    requested_count: int,
+    remaining: int,
+) -> tuple[str, dict[str, str] | None, int]:
+    """Best-effort reduce page size when remaining < requested_count.
+
+    Some servers have bugs when requesting a page size larger than the remaining
+    resources. If we know the total, we can reduce _count/page_size for the last
+    request.
+
+    Returns: (url, params, effective_count_used)
+    """
+
+    if remaining <= 0:
+        return url, params, requested_count
+
+    effective = min(int(requested_count), int(remaining))
+    if effective >= int(requested_count):
+        return url, params, requested_count
+
+    if params is not None:
+        params = dict(params)
+        params["_count"] = str(effective)
+        if "page_size" in params:
+            params["page_size"] = str(effective)
+        return url, params, effective
+
+    # We are following a server-provided next URL. Only rewrite it if it already
+    # contains paging-size params so we don't accidentally break a cursor URL.
+    if _url_has_any_param(url, keys=("_count", "page_size")):
+        url = _rewrite_url_query_param(url, key="_count", value=str(effective))
+        url = _rewrite_url_query_param(url, key="page_size", value=str(effective))
+        return url, params, effective
+
+    return url, params, requested_count
 
 
 def _resource_state_dir(*, output_dir: Path, resource_type: str) -> Path:
@@ -846,50 +918,75 @@ def fetch_resources(
     page_num = state.pages_completed
 
     while True:
-        url = state.request_url
-        params = state.request_params
+        base_url = state.request_url
+        base_params = state.request_params
         first_request = state.first_request
-        ctx = {"resource_type": resource_type, "url": url, "params": params}
 
-        if url_print.print_urls:
-            full = _build_full_url(client, url, params)
-            print(f"GET {full}")
+        # Best-effort: some servers behave badly when requesting a page size
+        # larger than the remaining resources. If we know the total (from a prior
+        # page) or the operator set a hard_limit, shrink _count/page_size for the
+        # final request.
+        remaining_by_total: int | None = None
+        if state.total_hint is not None:
+            try:
+                remaining_by_total = int(state.total_hint) - int(seen)
+            except Exception:  # noqa: BLE001
+                remaining_by_total = None
+        remaining_by_limit: int | None = None
+        if hard_limit is not None:
+            remaining_by_limit = int(hard_limit) - int(seen)
 
-        # On the first request, if we get a 400 error with both _count and page_size,
-        # retry with just _count (some servers reject both parameters together)
-        try:
-            r = _request_with_retry(
-                client,
-                "GET",
-                url,
-                params=params,
-                retry=retry,
-                log_fn=log_fn,
-                context=ctx,
-                curl_debug=curl_debug,
-                curl_auth=curl_auth,
-            )
-        except httpx.HTTPStatusError as ex:
-            # If this is the first request and we got a 400-level error with both params,
-            # retry with just _count
-            if first_request and params is not None and "page_size" in params and 400 <= ex.response.status_code < 500:
-                print(f"WARNING: Server rejected request with both _count and page_size (HTTP {ex.response.status_code})")
-                print("Retrying with only _count parameter...")
-                log_fn({
-                    **ctx,
-                    "kind": "parameter_conflict_retry",
-                    "status_code": ex.response.status_code,
-                    "original_params": params,
-                })
+        remaining: int | None = None
+        for cand in (remaining_by_total, remaining_by_limit):
+            if cand is None:
+                continue
+            remaining = cand if remaining is None else min(int(remaining), int(cand))
 
-                # Retry with just _count
-                params = {"_count": str(count), "_total": "none"}
-                ctx = {"resource_type": resource_type, "url": url, "params": params}
+        # Last-page candidate counts. We try +/- 1 around the remaining count to
+        # hedge against server off-by-one / total-count bugs.
+        candidate_remaining_counts: list[int] = [int(count)]
+        if remaining is not None and 0 < int(remaining) < int(count):
+            # If hard_limit is constraining, do not exceed it.
+            limit_is_binding = remaining_by_limit is not None and remaining == remaining_by_limit
+            candidates: list[int] = []
+            if not limit_is_binding:
+                candidates.append(int(remaining) + 1)
+            candidates.append(int(remaining))
+            candidates.append(max(int(remaining) - 1, 1))
+            # Keep unique and within bounds.
+            uniq: list[int] = []
+            for c in candidates:
+                c2 = min(max(int(c), 1), int(count))
+                if c2 not in uniq:
+                    uniq.append(c2)
+            candidate_remaining_counts = uniq
 
-                if url_print.print_urls:
-                    full = _build_full_url(client, url, params)
-                    print(f"GET {full}")
+        last_exc: Exception | None = None
+        r = None
+        url = base_url
+        params = base_params
+        effective_count = int(count)
+        for remaining_try in candidate_remaining_counts:
+            url = base_url
+            params = base_params
+            effective_count = int(count)
+            if remaining is not None:
+                url, params, effective_count = _maybe_adjust_request_for_remaining(
+                    url=url,
+                    params=params,
+                    requested_count=int(count),
+                    remaining=int(remaining_try),
+                )
 
+            ctx = {"resource_type": resource_type, "url": url, "params": params}
+
+            if url_print.print_urls:
+                full = _build_full_url(client, url, params)
+                print(f"GET {full}")
+
+            # On the first request, if we get a 400 error with both _count and page_size,
+            # retry with just _count (some servers reject both parameters together)
+            try:
                 r = _request_with_retry(
                     client,
                     "GET",
@@ -901,10 +998,73 @@ def fetch_resources(
                     curl_debug=curl_debug,
                     curl_auth=curl_auth,
                 )
-                state.request_params = params
-            else:
-                # Not a parameter conflict or not the first request - re-raise
+                break
+            except httpx.HTTPStatusError as ex:
+                # If this is the first request and we got a 400-level error with both params,
+                # retry with just _count
+                if first_request and params is not None and "page_size" in params and 400 <= ex.response.status_code < 500:
+                    print(
+                        f"WARNING: Server rejected request with both _count and page_size (HTTP {ex.response.status_code})"
+                    )
+                    print("Retrying with only _count parameter...")
+                    log_fn({
+                        **ctx,
+                        "kind": "parameter_conflict_retry",
+                        "status_code": ex.response.status_code,
+                        "original_params": params,
+                    })
+
+                    # Retry with just _count (respect any effective_count shrink).
+                    params2 = {"_count": str(effective_count), "_total": "none"}
+                    ctx2 = {"resource_type": resource_type, "url": url, "params": params2}
+
+                    if url_print.print_urls:
+                        full = _build_full_url(client, url, params2)
+                        print(f"GET {full}")
+
+                    try:
+                        r = _request_with_retry(
+                            client,
+                            "GET",
+                            url,
+                            params=params2,
+                            retry=retry,
+                            log_fn=log_fn,
+                            context=ctx2,
+                            curl_debug=curl_debug,
+                            curl_auth=curl_auth,
+                        )
+                        # Ensure subsequent logging/diagnostics use the actual
+                        # request parameters used for the successful request.
+                        params = params2
+                        ctx = ctx2
+                        state.request_params = params2
+                        break
+                    except httpx.HTTPStatusError as ex2:
+                        last_exc = ex2
+                else:
+                    last_exc = ex
+
+                # If this looks like a final-page request and we have other
+                # candidate counts to try, keep going.
+                if (
+                    remaining is not None
+                    and 0 < int(remaining) < int(count)
+                    and remaining_try != candidate_remaining_counts[-1]
+                ):
+                    status = ex.response.status_code
+                    print(
+                        f"WARNING: request failed near end of paging with HTTP {status}; "
+                        f"retrying with a different last-page _count candidate..."
+                    )
+                    continue
+
                 raise
+
+        if r is None:
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("request failed without raising an exception")
 
         state.first_request = False
 
@@ -1007,6 +1167,11 @@ def fetch_resources(
         # If we didn't get a wrapper total, fall back to Bundle.total when present.
         if total_hint is None and isinstance(bundle.get("total"), int):
             total_hint = int(bundle["total"])
+
+        # Persist total_hint so resumed downloads can adjust the final request.
+        if total_hint is not None and state.total_hint != total_hint:
+            state.total_hint = int(total_hint)
+            _save_resource_state(output_dir=output_dir, state=state)
 
         entries = list(_iter_bundle_entries(bundle))
         page_entries = len(entries)
