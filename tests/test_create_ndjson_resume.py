@@ -3,11 +3,19 @@ import json
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 
 def _load_create_ndjson_module():
     script_path = Path(__file__).resolve().parents[1] / "create_ndjson_from_api.py"
+
+    # Ensure repo root is importable so `create_ndjson_from_api.py` can import
+    # sibling modules like `check_dependencies.py`.
+    repo_root = str(Path(__file__).resolve().parents[1])
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
     spec = importlib.util.spec_from_file_location("create_ndjson_from_api", script_path)
     assert spec is not None
     assert spec.loader is not None
@@ -198,3 +206,116 @@ def test_fetch_resources_uses_saved_next_url_after_page_commit(tmp_path, monkeyp
         "Practitioner",
         "https://example.test/fhir/Practitioner?_getpages=abc&_getpagesoffset=1000",
     ]
+
+
+def test_fetch_resources_shrinks_count_when_remaining_known(tmp_path, monkeypatch):
+    m = _load_create_ndjson_module()
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+            self.headers = {"Content-Type": "application/fhir+json"}
+
+        def json(self):
+            return self._payload
+
+    # Seed state: we already wrote 1950 resources, and total is 2000 => remaining 50.
+    state = m._load_or_init_resource_state(output_dir=tmp_path, resource_type="Practitioner", count=1000)
+    state.resources_written = 1950
+    state.request_params = {"_count": "1000", "page_size": "1000", "_total": "none"}
+    state.total_hint = 2000
+    m._save_resource_state(output_dir=tmp_path, state=state)
+
+    captured: dict[str, dict[str, str] | None] = {"params": None}
+
+    def fake_request_with_retry(client, method, url, *, params, retry, log_fn, context, curl_debug, curl_auth):
+        captured["params"] = dict(params) if params is not None else None
+        return _FakeResponse(
+            {
+                "resourceType": "Bundle",
+                "total": 2000,
+                "entry": [{"resource": {"resourceType": "Practitioner", "id": "p_last"}}],
+            }
+        )
+
+    monkeypatch.setattr(m, "_request_with_retry", fake_request_with_retry)
+
+    pages = m.fetch_resources(
+        client=object(),
+        output_dir=tmp_path,
+        resource_type="Practitioner",
+        count=1000,
+        hard_limit=None,
+        retry=m.RetryConfig(),
+        log_dir=tmp_path / "log",
+        url_print=m.UrlPrintConfig(print_urls=False),
+        curl_debug=m.CurlDebugConfig(curl_on_error=False),
+        curl_auth=None,
+    )
+    _ = next(pages)
+
+    assert captured["params"] is not None
+    # We try remaining+1 first to hedge against server off-by-one total bugs.
+    assert captured["params"]["_count"] == "51"
+    assert captured["params"]["page_size"] == "51"
+
+
+def test_fetch_resources_last_page_off_by_one_fallback(tmp_path, monkeypatch):
+    m = _load_create_ndjson_module()
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+            self.headers = {"Content-Type": "application/fhir+json"}
+
+        def json(self):
+            return self._payload
+
+    # Seed state: remaining is 50.
+    state = m._load_or_init_resource_state(output_dir=tmp_path, resource_type="Practitioner", count=1000)
+    state.resources_written = 1950
+    state.request_params = {"_count": "1000", "page_size": "1000", "_total": "none"}
+    state.total_hint = 2000
+    m._save_resource_state(output_dir=tmp_path, state=state)
+
+    tried_counts: list[str] = []
+
+    def fake_request_with_retry(client, method, url, *, params, retry, log_fn, context, curl_debug, curl_auth):
+        assert params is not None
+        tried_counts.append(str(params.get("_count")))
+        if params.get("_count") == "51":
+            # Simulate buggy server rejecting the first off-by-one guess.
+            raise httpx.HTTPStatusError(
+                "bad request",
+                request=httpx.Request("GET", "https://example.test"),
+                response=httpx.Response(400, json={"resourceType": "OperationOutcome"}),
+            )
+        return _FakeResponse(
+            {
+                "resourceType": "Bundle",
+                "total": 2000,
+                "entry": [{"resource": {"resourceType": "Practitioner", "id": "p_last"}}],
+            }
+        )
+
+    monkeypatch.setattr(m, "_request_with_retry", fake_request_with_retry)
+
+    pages = m.fetch_resources(
+        client=object(),
+        output_dir=tmp_path,
+        resource_type="Practitioner",
+        count=1000,
+        hard_limit=None,
+        retry=m.RetryConfig(),
+        log_dir=tmp_path / "log",
+        url_print=m.UrlPrintConfig(print_urls=False),
+        curl_debug=m.CurlDebugConfig(curl_on_error=False),
+        curl_auth=None,
+    )
+    _ = next(pages)
+
+    # We should have tried 51 first (with page_size), retried 51 without
+    # page_size (parameter conflict handling), then fallen back to 50.
+    assert tried_counts[:3] == ["51", "51", "50"]
