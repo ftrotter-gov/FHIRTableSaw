@@ -25,7 +25,7 @@ class BaseImporter:
     RESOURCE_TYPE = "Base"
     NODE_LABEL = "Base"
     
-    def __init__(self, *, neo4j_uri: str, neo4j_user: str, neo4j_password: str, verbose: bool = False):
+    def __init__(self, *, neo4j_uri: str, neo4j_user: str, neo4j_password: str):
         """
         Initialize the importer.
         
@@ -33,10 +33,8 @@ class BaseImporter:
             neo4j_uri: Neo4j connection URI
             neo4j_user: Neo4j username
             neo4j_password: Neo4j password
-            verbose: Enable verbose output
         """
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
-        self.verbose = verbose
     
     def close(self) -> None:
         """Close the Neo4j driver connection."""
@@ -134,13 +132,12 @@ class BaseImporter:
     
     def _log(self, *, message: str) -> None:
         """
-        Log a message if verbose mode is enabled.
+        Log a progress message.
         
         Args:
             message: The message to log
         """
-        if self.verbose:
-            print(message, file=sys.stderr)
+        print(message, file=sys.stderr)
     
     def read_ndjson(self, *, filepath: Path) -> List[Dict[str, Any]]:
         """

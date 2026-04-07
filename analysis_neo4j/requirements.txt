@@ -1,5 +1,0 @@
-# Neo4j Python Driver
-neo4j>=5.14.0
-
-# For reading NDJSON
-# No additional dependencies needed - uses standard json module

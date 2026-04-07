@@ -23,7 +23,7 @@ This subproject provides:
 ## Prerequisites
 
 - Docker and Docker Compose
-- Python 3.9+
+- Python 3.9+ with the parent FHIRTableSaw virtual environment activated
 - FHIR NDJSON files to import
 
 ## Quick Start
@@ -53,13 +53,18 @@ Neo4j will be available at:
 ### 2. Install Python Dependencies
 
 ```bash
-# Create virtual environment (recommended)
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Navigate back to parent directory and activate the main venv
+cd ..
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Install Neo4j driver if not already installed
+pip install neo4j>=5.14.0
+
+# Navigate back to analysis_neo4j
+cd analysis_neo4j
 ```
+
+**Note:** This subproject uses the parent FHIRTableSaw Python environment. The neo4j driver has been added to the parent `requirements.txt`.
 
 ### 3. Create Indexes
 
@@ -76,9 +81,6 @@ python scripts/import_ndjson.py /path/to/ndjson/directory
 
 # Or specify batch size
 python scripts/import_ndjson.py /path/to/ndjson/directory --batch-size 1000
-
-# Import with progress reporting
-python scripts/import_ndjson.py /path/to/ndjson/directory --verbose
 ```
 
 ### 5. Verify Import

@@ -13,5 +13,8 @@ pandas>=2.0.0
 great-expectations>=0.18.0
 fhir4ds>=0.1.0
 
+# Neo4j analysis (for analysis_neo4j subproject)
+neo4j>=5.14.0
+
 # Note: If fhir4ds is not available in PyPI, install from source:
 # pip install git+https://github.com/CODEX-CELIDA/fhir4ds.git

@@ -5,7 +5,7 @@ Get up and running with Neo4j FHIR analysis in 5 minutes.
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- Python 3.9+
+- Parent FHIRTableSaw Python environment (see main project README)
 - FHIR NDJSON files (Practitioner, Organization, etc.)
 
 ## Step-by-Step Setup
@@ -43,13 +43,21 @@ You should see "Started" in the logs.
 cat schema/indexes.cypher | docker exec -i fhir_neo4j_analysis cypher-shell -u neo4j -p your_secure_password_here
 ```
 
-### 4. Install Python Dependencies
+### 4. Activate Python Environment
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+# Navigate to parent directory and activate main venv
+cd ..
+source .venv/bin/activate
+
+# Install Neo4j driver if needed
+pip install neo4j>=5.14.0
+
+# Return to analysis_neo4j
+cd analysis_neo4j
 ```
+
+**Note:** Uses the parent FHIRTableSaw Python environment.
 
 ### 5. Import Your Data
 

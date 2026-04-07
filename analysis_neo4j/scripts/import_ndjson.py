@@ -101,14 +101,13 @@ def load_neo4j_config() -> Dict[str, str]:
     return config
 
 
-def import_resource_files(*, files: Dict[str, Path], batch_size: int, verbose: bool) -> None:
+def import_resource_files(*, files: Dict[str, Path], batch_size: int) -> None:
     """
     Import all discovered NDJSON files into Neo4j.
     
     Args:
         files: Dictionary mapping resource type to file path
         batch_size: Number of records to process per batch
-        verbose: Enable verbose output
     """
     if not files:
         print("No FHIR NDJSON files found to import.")
@@ -134,8 +133,7 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, verbose: b
     # Import in the specified order
     for resource_type in import_order:
         if resource_type not in files:
-            if verbose:
-                print(f"Skipping {resource_type} (not found)")
+            print(f"Skipping {resource_type} (not found)")
             continue
         
         filepath = files[resource_type]
@@ -149,8 +147,7 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, verbose: b
             importer = importer_class(
                 neo4j_uri=config['uri'],
                 neo4j_user=config['user'],
-                neo4j_password=config['password'],
-                verbose=verbose
+                neo4j_password=config['password']
             )
             
             importer.import_file(filepath=filepath, batch_size=batch_size)
@@ -160,9 +157,8 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, verbose: b
             
         except Exception as e:
             print(f"✗ Error importing {resource_type}: {e}")
-            if verbose:
-                import traceback
-                traceback.print_exc()
+            import traceback
+            traceback.print_exc()
     
     print(f"\n{'='*60}")
     print("Import completed!")
@@ -179,8 +175,8 @@ Examples:
   # Import all FHIR resources from a directory
   python import_ndjson.py /data/fhir
   
-  # Use custom batch size and verbose output
-  python import_ndjson.py /data/fhir --batch-size 500 --verbose
+  # Use custom batch size
+  python import_ndjson.py /data/fhir --batch-size 500
   
   # Load environment from .env file (recommended)
   export NEO4J_PASSWORD=your_password
@@ -210,13 +206,6 @@ File Naming:
         help='Number of records to process per batch (default: 1000)'
     )
     
-    parser.add_argument(
-        '--verbose',
-        '-v',
-        action='store_true',
-        help='Enable verbose output'
-    )
-    
     args = parser.parse_args()
     
     # Load .env file if it exists
@@ -242,8 +231,7 @@ File Naming:
     # Import files
     import_resource_files(
         files=files,
-        batch_size=args.batch_size,
-        verbose=args.verbose
+        batch_size=args.batch_size
     )
 
 

@@ -57,10 +57,6 @@ FOR (e:Endpoint) ON (e.identifier_systems);
 // Indexes for Common Query Patterns
 // ============================================
 
-// Resource type for mixed queries
-CREATE INDEX resource_type_all IF NOT EXISTS
-FOR (n) ON (n.resource_type);
-
 // Active status for filtering
 CREATE INDEX active_practitioner IF NOT EXISTS
 FOR (p:Practitioner) ON (p.active);
