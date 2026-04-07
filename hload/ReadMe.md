@@ -30,9 +30,6 @@ A Python script that uses the `hapi-fhir-cli bulk-import` command to load NDJSON
 # Basic usage
 python hload/bulk_import_loader.py /path/to/ndjson/files
 
-# Or use the shell wrapper
-./hload/bulk_import_loader.sh /path/to/ndjson/files
-
 # With custom HAPI server URL
 python hload/bulk_import_loader.py /path/to/ndjson --target-url http://localhost:8080/fhir
 
