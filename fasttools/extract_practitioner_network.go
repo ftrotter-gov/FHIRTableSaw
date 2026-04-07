@@ -373,7 +373,7 @@ func writePractitionerOutputFiles(npi, outputDir string, resources *ResourceSet,
 			return nil
 		}
 
-		filename := filepath.Join(outputDir, fmt.Sprintf("%s_%s.ndjson", npi, resourceType))
+		filename := filepath.Join(outputDir, fmt.Sprintf("%s.%s.ndjson", resourceType, npi))
 		f, err := os.Create(filename)
 		if err != nil {
 			return fmt.Errorf("failed to create %s: %w", filename, err)

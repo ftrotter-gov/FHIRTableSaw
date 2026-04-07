@@ -2,6 +2,8 @@
 #
 # These binaries are OS/arch-specific and should not be committed.
 
+run_*
+
 # Convention: build fasttools Go binaries with a .gobin suffix
 *.gobin
 
