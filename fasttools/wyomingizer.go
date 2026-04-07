@@ -97,9 +97,7 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	endpointIDs := makeStringSet(1024)
 
 	// PASS 1: seed Locations by state.
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "pass1: seeding locations by state (%s)\n", statesKey)
-	}
+	fmt.Fprintf(os.Stderr, "pass1: seeding locations by state (%s)\n", statesKey)
 	for _, path := range inputs.locations {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, state, ok, err := parseLocationIDAndState(line)
@@ -122,9 +120,7 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	}
 
 	// PASS 2: seed Organizations and Practitioners by their own addresses.
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "pass2: seeding organizations and practitioners by address (%s)\n", statesKey)
-	}
+	fmt.Fprintf(os.Stderr, "pass2: seeding organizations and practitioners by address (%s)\n", statesKey)
 
 	for _, path := range inputs.organizations {
 		inv, err := scanFileLines(path, func(line []byte) error {
@@ -169,10 +165,8 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	}
 
 	// PASS 3: find all connecting resources (strict connections only).
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "pass3: finding resources connected to %d locations, %d organizations, %d practitioners\n",
-			locationIDs.len(), orgIDs.len(), practitionerIDs.len())
-	}
+	fmt.Fprintf(os.Stderr, "pass3: finding resources connected to %d locations, %d organizations, %d practitioners\n",
+		locationIDs.len(), orgIDs.len(), practitionerIDs.len())
 
 	// Organizations that reference seeded Locations or Practitioners
 	for _, path := range inputs.organizations {
@@ -251,6 +245,9 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 	}
 
 	// OrganizationAffiliations that reference seeded Organizations or Locations
+	if opts.Verbose {
+		fmt.Fprintf(os.Stderr, "  scanning %d OrganizationAffiliation file(s)...\n", len(inputs.organizationAffiliations))
+	}
 	for _, path := range inputs.organizationAffiliations {
 		inv, err := scanFileLines(path, func(line []byte) error {
 			id, ok, err := parseID(line)
@@ -280,6 +277,9 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 		if err != nil {
 			return st, fmt.Errorf("organizationAffiliation connection scan %s: %w", path, err)
 		}
+	}
+	if opts.Verbose && len(inputs.organizationAffiliations) > 0 {
+		fmt.Fprintf(os.Stderr, "  found %d OrganizationAffiliation(s)\n", st.OrganizationAffiliationsWritten)
 	}
 
 	// Endpoints referenced by seeded Organizations or collected from other resources
@@ -315,10 +315,8 @@ func Wyomingize(opts WyomingizeOptions) (WyomingizeStats, error) {
 		return st, err
 	}
 
-	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "done: wrote Location=%d Organization=%d Practitioner=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d (invalid_json=%d)\n",
-			st.LocationsWritten, st.OrganizationsWritten, st.PractitionersWritten, st.PractitionerRolesWritten, st.OrganizationAffiliationsWritten, st.EndpointsWritten, st.InvalidJSONLines)
-	}
+	fmt.Fprintf(os.Stderr, "done: wrote Location=%d Organization=%d Practitioner=%d PractitionerRole=%d OrganizationAffiliation=%d Endpoint=%d (invalid_json=%d)\n",
+		st.LocationsWritten, st.OrganizationsWritten, st.PractitionersWritten, st.PractitionerRolesWritten, st.OrganizationAffiliationsWritten, st.EndpointsWritten, st.InvalidJSONLines)
 	return st, nil
 }
 
