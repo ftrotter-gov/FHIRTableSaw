@@ -3,6 +3,10 @@ set -euo pipefail
 
 # Download ONLY Practitioner resources to NDJSON.
 #
+# Resume behavior:
+# - Downloads are resumable via state under: <output_dir>/download_state/Practitioner/
+# - Re-running this script will resume if state.json says status=in_progress.
+#
 # Usage:
 #   ./runner_practitioner.sh [output_dir] [extra download_cms_ndjson.py args...]
 #

@@ -21,6 +21,7 @@ import shutil
 import threading
 import time
 import re
+import json
 from pathlib import Path
 
 
@@ -113,6 +114,25 @@ def _resource_state_dir(*, output_dir: Path, resource_type: str) -> Path:
     safe = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in resource_type).strip("._")
     safe = safe or "unknown"
     return output_dir / "download_state" / safe
+
+
+def _resource_state_path(*, output_dir: Path, resource_type: str) -> Path:
+    return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "state.json"
+
+
+def _resource_has_in_progress_state(*, output_dir: Path, resource_type: str) -> bool:
+    """Return True if create_ndjson_from_api left resumable state marked in_progress."""
+
+    state_path = _resource_state_path(output_dir=output_dir, resource_type=resource_type)
+    if not state_path.exists():
+        return False
+    try:
+        with state_path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        # If state is corrupt/unreadable, do not assume resumable.
+        return False
+    return str(payload.get("status") or "").lower() == "in_progress"
 
 
 def _reset_resource_download_state(*, output_dir: Path, resource_type: str) -> None:
@@ -473,8 +493,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\n[{rt}] Download command: " + " ".join(cmd))
                 return int(_run_one_resource_type(resource_type=rt, cmd=cmd))
 
-            # Verify first if a file exists.
-            if ndjson_path.exists() and ndjson_path.stat().st_size > 0:
+            # If there's an in-progress resumable download state, always resume via
+            # create_ndjson_from_api.py instead of verify-first.
+            #
+            # Why: verify will almost certainly FAIL on incomplete files, and without
+            # destructive re-download enabled we'd otherwise skip the resource type,
+            # preventing resume.
+            resume_in_progress = _resource_has_in_progress_state(output_dir=output_dir, resource_type=rt)
+            if resume_in_progress:
+                print(f"[{rt}] Found in-progress download state; resuming...")
+
+            # Verify first if a file exists and we are NOT resuming.
+            if (not resume_in_progress) and ndjson_path.exists() and ndjson_path.stat().st_size > 0:
                 v_rc, v_fields = _run_verify_one_resource_type(
                     resource_type=rt,
                     ndjson_dir=output_dir,
