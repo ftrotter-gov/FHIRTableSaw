@@ -1,0 +1,17 @@
+# Environment variables (contains passwords)
+.env
+
+# Neo4j data and logs
+data/
+logs/
+import/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environment
+venv/
+.venv/

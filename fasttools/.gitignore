@@ -2,7 +2,7 @@
 #
 # These binaries are OS/arch-specific and should not be committed.
 
-run_WY.sh
+run_*
 
 # Convention: build fasttools Go binaries with a .gobin suffix
 *.gobin
