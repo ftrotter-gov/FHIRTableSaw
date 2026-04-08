@@ -75,13 +75,27 @@ cat schema/indexes.cypher | docker exec -i fhir_neo4j_analysis cypher-shell -u n
 
 ### 4. Import FHIR Data
 
-```bash
-# Import all supported resources from a directory
-python scripts/import_ndjson.py /path/to/ndjson/directory
+**Two import scripts are available:**
 
-# Or specify batch size
-python scripts/import_ndjson.py /path/to/ndjson/directory --batch-size 1000
+#### Option A: Fast Import (Recommended for initial loads)
+```bash
+# FAST MODE: 10-100x faster using CREATE (for empty database)
+python scripts/import_ndjson_fast.py /path/to/ndjson/directory --batch-size 10000
+
+# Test with limit first
+python scripts/import_ndjson_fast.py /path/to/ndjson/directory --batch-size 10000 --limit 1000
 ```
+
+#### Option B: Safe Import/Update (For updating existing data)
+```bash
+# SAFE MODE: Uses MERGE (slower, but idempotent and safe for updates)
+python scripts/import_or_update_ndjson.py /path/to/ndjson/directory --batch-size 5000
+```
+
+**Which to use?**
+- **First-time import into empty database**: Use `import_ndjson_fast.py` (much faster!)
+- **Updating existing data**: Use `import_or_update_ndjson.py`
+- **Not sure**: Use `import_or_update_ndjson.py` (safer)
 
 ### 5. Verify Import
 

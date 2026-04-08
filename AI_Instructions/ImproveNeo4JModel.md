@@ -106,3 +106,57 @@ When you see:
         },
 
         Any non english language should be added to a "languages_spoken" array on the practicioner.
+
+
+When processing endpoints you should remember:
+
+{
+    "resourceType": "Endpoint",
+    "id": "Endpoint-ff89cb4e-4e59-48a2-89ab-d6c92908b769",
+    "meta": {
+        "lastUpdated": "2026-04-07T17:20:10.173225Z"
+    },
+    "extension": [
+        {
+            "url": "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-endpoint-rank",
+            "valuePositiveInt": 4
+        },
+        {
+            "url": "http://hl7.org/fhir/us/ndh/StructureDefinition/base-ext-verification-status",
+            "valueCodeableConcept": {
+                "coding": [
+                    {
+                        "system": "http://hl7.org/fhir/us/ndh/CodeSystem/NdhVerificationStatusCS",
+                        "code": "complete",
+                        "display": "Complete"
+                    }
+                ]
+            }
+        }
+    ],
+    "status": "active",
+    "connectionType": {
+        "system": "http://terminology.hl7.org/CodeSystem/endpoint-connection-type",
+        "code": "hl7-fhir-rest",
+        "display": "HL7 FHIR"
+    },
+    "name": "Endpoint ff89cb4e-4e59-48a2-89ab-d6c92908b769",
+    "address": "https://fhir.yourcareuniverse.net/tenant/400c346b-db8c-4fe4-81d3-fc94d7e9bf90",
+    "payloadType": [
+        {
+            "coding": [
+                {
+                    "system": "http://terminology.hl7.org/CodeSystem/data-absent-reason",
+                    "version": "1.0.0",
+                    "code": "not-applicable"
+                }
+            ]
+        }
+    ]
+}
+
+All of this can be boiled down to "FHIR_address" =  https://fhir.yourcareuniverse.net/tenant/400c346b-db8c-4fe4-81d3-fc94d7e9bf90
+If it the address looks like an email then it is "Direct_address" = "bob@example.com"
+You should use a simple regex to spot the difference.
+The only other thing you need to do at this time is to also capture "rank"
+

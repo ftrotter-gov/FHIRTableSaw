@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-Main FHIR NDJSON to Neo4j import orchestrator.
+FAST FHIR NDJSON to Neo4j import script using CREATE (not idempotent).
 
-This script discovers FHIR NDJSON files in a directory and imports them into Neo4j.
-It uses exact filename matching to prevent misclassification (e.g., OrganizationAffiliation
-vs Organization).
+This script uses CREATE instead of MERGE for 10-100x faster imports.
+WARNING: This is NOT idempotent - running twice will create duplicates!
+Only use this for initial loads into an empty database.
+
+For updates to existing data, use update_ndjson.py instead.
 
 Usage:
-    python import_ndjson.py /path/to/ndjson/directory [options]
+    python import_ndjson_fast.py /path/to/ndjson/directory [options]
 
 Example:
-    python import_ndjson.py /data/fhir --batch-size 1000 --verbose
+    python import_ndjson_fast.py /data/fhir --batch-size 10000
 """
 
 import os
@@ -161,7 +163,7 @@ def load_neo4j_config() -> Dict[str, str]:
     return config
 
 
-def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag: Optional[str] = None) -> None:
+def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
     """
     Import all discovered NDJSON files into Neo4j.
     
@@ -169,6 +171,7 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag
         files: Dictionary mapping resource type to file path
         batch_size: Number of records to process per batch
         import_tag: Optional tag to identify this import run (only set on new nodes)
+        limit: Optional limit on number of records to import per resource type
     """
     if not files:
         print("No FHIR NDJSON files found to import.")
@@ -209,10 +212,11 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag
                 neo4j_uri=config['uri'],
                 neo4j_user=config['user'],
                 neo4j_password=config['password'],
-                import_tag=import_tag
+                import_tag=import_tag,
+                use_create=True  # FAST MODE: Use CREATE instead of MERGE
             )
             
-            importer.import_file(filepath=filepath, batch_size=batch_size)
+            importer.import_file(filepath=filepath, batch_size=batch_size, limit=limit)
             importer.close()
             
             print(f"✓ Successfully imported {resource_type}")
@@ -230,22 +234,28 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='Import FHIR NDJSON files into Neo4j graph database',
+        description='FAST import of FHIR NDJSON files into Neo4j using CREATE (not idempotent)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Import all FHIR resources from a directory
-  python import_ndjson.py /data/fhir
+  # FAST initial import with large batch size (recommended)
+  python import_ndjson_fast.py /data/fhir --batch-size 10000
   
-  # Use custom batch size
-  python import_ndjson.py /data/fhir --batch-size 500
+  # Test with smaller dataset first
+  python import_ndjson_fast.py /data/fhir --batch-size 10000 --limit 1000
   
   # Tag this import run (useful for tracking data sources)
-  python import_ndjson.py /data/fhir --import-tag "initial_load_2026"
+  python import_ndjson_fast.py /data/fhir --batch-size 10000 --import-tag "initial_load_2026"
   
   # Load environment from .env file (recommended)
   export NEO4J_PASSWORD=your_password
-  python import_ndjson.py /data/fhir
+  python import_ndjson_fast.py /data/fhir --batch-size 10000
+
+WARNING:
+  This script uses CREATE, not MERGE! Running it twice on the same data
+  will create duplicate nodes. Only use for initial loads into empty database.
+  
+  For updates, use: import_or_update_ndjson.py
 
 File Naming:
   Files can be named with the resource type with .ndjson extension:
@@ -287,6 +297,13 @@ File Naming:
         help='Optional tag to identify this import run (only applied to newly created nodes)'
     )
     
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='Limit the number of records to import per resource type (useful for testing)'
+    )
+    
     args = parser.parse_args()
     
     # Load .env file if it exists
@@ -313,7 +330,8 @@ File Naming:
     import_resource_files(
         files=files,
         batch_size=args.batch_size,
-        import_tag=args.import_tag
+        import_tag=args.import_tag,
+        limit=args.limit
     )
 
 

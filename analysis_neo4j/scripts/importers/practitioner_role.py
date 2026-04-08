@@ -4,7 +4,7 @@ PractitionerRole resource importer.
 
 from typing import Dict, Any, List
 from neo4j import Session
-from .base import BaseImporter
+from .base import BaseImporter, _to_json_string
 
 
 class PractitionerRoleImporter(BaseImporter):
@@ -33,8 +33,11 @@ class PractitionerRoleImporter(BaseImporter):
                 self._log(message=f"Skipping PractitionerRole without id: {resource}")
                 continue
             
-            # Extract identifiers
+            # Extract identifiers as objects
             identifiers = self._extract_identifiers(resource=resource)
+            
+            # Extract single NPI for practitioner roles
+            npi = self._extract_npi_single(identifiers=identifiers)
             
             # Extract practitioner reference
             practitioner_ref = resource.get('practitioner', {})
@@ -95,30 +98,48 @@ class PractitionerRoleImporter(BaseImporter):
                 'endpoint_ids': endpoint_ids,
                 'specialties': [s['code'] for s in specialties if s.get('code')],
                 'specialty_displays': [s['display'] for s in specialties if s.get('display')],
-                'npi': identifiers['npi'],
-                'identifier_systems': identifiers['identifier_systems'],
-                'identifier_values': identifiers['identifier_values'],
+                'npi': npi,
+                'identifiers': _to_json_string(obj=identifiers),
                 'import_tag': self.import_tag,
             })
         
-        # Batch import nodes
-        query = """
-        UNWIND $batch AS role
-        MERGE (pr:PractitionerRole {fhir_id: role.fhir_id})
-        ON CREATE SET pr.import_tag = role.import_tag
-        SET pr.resource_type = role.resource_type,
-            pr.active = role.active,
-            pr.practitioner_reference = role.practitioner_id,
-            pr.organization_reference = role.organization_id,
-            pr.location_references = role.location_ids,
-            pr.endpoint_references = role.endpoint_ids,
-            pr.specialties = role.specialties,
-            pr.specialty_displays = role.specialty_displays,
-            pr.npi = role.npi,
-            pr.identifier_systems = role.identifier_systems,
-            pr.identifier_values = role.identifier_values
-        RETURN count(pr) AS count
-        """
+        # Batch import nodes - use CREATE or MERGE based on mode
+        if self.use_create:
+            query = """
+            UNWIND $batch AS role
+            CREATE (pr:PractitionerRole {
+                fhir_id: role.fhir_id,
+                import_tag: role.import_tag,
+                resource_type: role.resource_type,
+                active: role.active,
+                practitioner_reference: role.practitioner_id,
+                organization_reference: role.organization_id,
+                location_references: role.location_ids,
+                endpoint_references: role.endpoint_ids,
+                specialties: role.specialties,
+                specialty_displays: role.specialty_displays,
+                npi: role.npi,
+                identifiers: role.identifiers
+            })
+            RETURN count(pr) AS count
+            """
+        else:
+            query = """
+            UNWIND $batch AS role
+            MERGE (pr:PractitionerRole {fhir_id: role.fhir_id})
+            ON CREATE SET pr.import_tag = role.import_tag
+            SET pr.resource_type = role.resource_type,
+                pr.active = role.active,
+                pr.practitioner_reference = role.practitioner_id,
+                pr.organization_reference = role.organization_id,
+                pr.location_references = role.location_ids,
+                pr.endpoint_references = role.endpoint_ids,
+                pr.specialties = role.specialties,
+                pr.specialty_displays = role.specialty_displays,
+                pr.npi = role.npi,
+                pr.identifiers = role.identifiers
+            RETURN count(pr) AS count
+            """
         
         result = session.run(query, batch=role_data)
         record = result.single()

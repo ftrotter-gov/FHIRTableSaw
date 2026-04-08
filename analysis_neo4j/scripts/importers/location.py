@@ -2,9 +2,9 @@
 Location resource importer.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from neo4j import Session
-from .base import BaseImporter
+from .base import BaseImporter, _to_json_string
 
 
 class LocationImporter(BaseImporter):
@@ -33,7 +33,7 @@ class LocationImporter(BaseImporter):
                 self._log(message=f"Skipping Location without id: {resource}")
                 continue
             
-            # Extract identifiers
+            # Extract identifiers as objects
             identifiers = self._extract_identifiers(resource=resource)
             
             # Extract status
@@ -52,22 +52,33 @@ class LocationImporter(BaseImporter):
                             if isinstance(code, dict):
                                 location_types.append(code.get('display', code.get('code', '')))
             
-            # Extract address
-            address = resource.get('address', {})
-            address_line = None
-            city = None
-            state = None
-            postal_code = None
-            country = None
-            
-            if isinstance(address, dict):
-                lines = address.get('line', [])
-                if isinstance(lines, list) and lines:
-                    address_line = ', '.join(lines)
-                city = address.get('city')
-                state = address.get('state')
-                postal_code = address.get('postalCode')
-                country = address.get('country')
+            # Extract address (Location has single address, not array)
+            address = None
+            address_raw = resource.get('address', {})
+            if isinstance(address_raw, dict) and address_raw:
+                # Join line array into single string
+                lines = address_raw.get('line', [])
+                line_str = ', '.join(lines) if isinstance(lines, list) else str(lines) if lines else None
+                
+                address = {}
+                if line_str:
+                    address['line'] = line_str
+                if address_raw.get('city'):
+                    address['city'] = address_raw.get('city')
+                if address_raw.get('state'):
+                    address['state'] = address_raw.get('state')
+                if address_raw.get('postalCode'):
+                    address['postalCode'] = address_raw.get('postalCode')
+                if address_raw.get('country'):
+                    address['country'] = address_raw.get('country')
+                if address_raw.get('type'):
+                    address['type'] = address_raw.get('type')
+                if address_raw.get('use'):
+                    address['use'] = address_raw.get('use')
+                
+                # If address is empty after all checks, set to None
+                if not address:
+                    address = None
             
             # Extract position (lat/long)
             position = resource.get('position', {})
@@ -104,44 +115,55 @@ class LocationImporter(BaseImporter):
                 'status': status,
                 'name': name,
                 'location_types': location_types,
-                'address_line': address_line,
-                'city': city,
-                'state': state,
-                'postal_code': postal_code,
-                'country': country,
+                'address': _to_json_string(obj=address),
                 'latitude': latitude,
                 'longitude': longitude,
                 'managing_organization_id': managing_org_id,
                 'part_of_id': part_of_id,
                 'endpoint_ids': endpoint_ids,
-                'identifier_systems': identifiers['identifier_systems'],
-                'identifier_values': identifiers['identifier_values'],
+                'identifiers': _to_json_string(obj=identifiers),
                 'import_tag': self.import_tag,
             })
         
-        # Batch import nodes
-        query = """
-        UNWIND $batch AS loc
-        MERGE (l:Location {fhir_id: loc.fhir_id})
-        ON CREATE SET l.import_tag = loc.import_tag
-        SET l.resource_type = loc.resource_type,
-            l.status = loc.status,
-            l.name = loc.name,
-            l.location_types = loc.location_types,
-            l.address_line = loc.address_line,
-            l.city = loc.city,
-            l.state = loc.state,
-            l.postal_code = loc.postal_code,
-            l.country = loc.country,
-            l.latitude = loc.latitude,
-            l.longitude = loc.longitude,
-            l.managing_organization_reference = loc.managing_organization_id,
-            l.part_of_reference = loc.part_of_id,
-            l.endpoint_references = loc.endpoint_ids,
-            l.identifier_systems = loc.identifier_systems,
-            l.identifier_values = loc.identifier_values
-        RETURN count(l) AS count
-        """
+        # Batch import nodes - use CREATE or MERGE based on mode
+        if self.use_create:
+            query = """
+            UNWIND $batch AS loc
+            CREATE (l:Location {
+                fhir_id: loc.fhir_id,
+                import_tag: loc.import_tag,
+                resource_type: loc.resource_type,
+                status: loc.status,
+                name: loc.name,
+                location_types: loc.location_types,
+                address: loc.address,
+                latitude: loc.latitude,
+                longitude: loc.longitude,
+                managing_organization_reference: loc.managing_organization_id,
+                part_of_reference: loc.part_of_id,
+                endpoint_references: loc.endpoint_ids,
+                identifiers: loc.identifiers
+            })
+            RETURN count(l) AS count
+            """
+        else:
+            query = """
+            UNWIND $batch AS loc
+            MERGE (l:Location {fhir_id: loc.fhir_id})
+            ON CREATE SET l.import_tag = loc.import_tag
+            SET l.resource_type = loc.resource_type,
+                l.status = loc.status,
+                l.name = loc.name,
+                l.location_types = loc.location_types,
+                l.address = loc.address,
+                l.latitude = loc.latitude,
+                l.longitude = loc.longitude,
+                l.managing_organization_reference = loc.managing_organization_id,
+                l.part_of_reference = loc.part_of_id,
+                l.endpoint_references = loc.endpoint_ids,
+                l.identifiers = loc.identifiers
+            RETURN count(l) AS count
+            """
         
         result = session.run(query, batch=location_data)
         record = result.single()

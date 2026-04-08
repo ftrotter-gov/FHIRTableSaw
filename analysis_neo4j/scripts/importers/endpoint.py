@@ -2,9 +2,9 @@
 Endpoint resource importer.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from neo4j import Session
-from .base import BaseImporter
+from .base import BaseImporter, _to_json_string
 
 
 class EndpointImporter(BaseImporter):
@@ -33,35 +33,25 @@ class EndpointImporter(BaseImporter):
                 self._log(message=f"Skipping Endpoint without id: {resource}")
                 continue
             
-            # Extract identifiers
+            # Extract identifiers as objects
             identifiers = self._extract_identifiers(resource=resource)
             
             # Extract status
             status = resource.get('status')
             
-            # Extract connection type
-            connection_type = None
-            conn_type_obj = resource.get('connectionType', {})
-            if isinstance(conn_type_obj, dict):
-                coding = conn_type_obj.get('coding', [])
-                if coding and isinstance(coding, list) and len(coding) > 0:
-                    connection_type = coding[0].get('display', coding[0].get('code', ''))
-            
-            # Extract name
-            name = resource.get('name')
-            
-            # Extract address (URL)
+            # Extract address and categorize as FHIR or Direct
             address = resource.get('address')
+            fhir_address = None
+            direct_address = None
             
-            # Extract payload types
-            payload_types = []
-            for payload in resource.get('payloadType', []):
-                if isinstance(payload, dict):
-                    coding = payload.get('coding', [])
-                    if coding and isinstance(coding, list):
-                        for code in coding:
-                            if isinstance(code, dict):
-                                payload_types.append(code.get('display', code.get('code', '')))
+            if address:
+                if self._is_email(address=address):
+                    direct_address = address
+                else:
+                    fhir_address = address
+            
+            # Extract rank from extensions
+            rank = self._extract_rank(resource=resource)
             
             # Extract managing organization
             managing_org = resource.get('managingOrganization', {})
@@ -72,32 +62,45 @@ class EndpointImporter(BaseImporter):
                 'fhir_id': fhir_id,
                 'resource_type': self.RESOURCE_TYPE,
                 'status': status,
-                'connection_type': connection_type,
-                'name': name,
-                'address': address,
-                'payload_types': payload_types,
+                'FHIR_address': fhir_address,
+                'Direct_address': direct_address,
+                'rank': rank,
+                'identifiers': _to_json_string(obj=identifiers),
                 'managing_organization_id': managing_org_id,
-                'identifier_systems': identifiers['identifier_systems'],
-                'identifier_values': identifiers['identifier_values'],
                 'import_tag': self.import_tag,
             })
         
-        # Batch import nodes
-        query = """
-        UNWIND $batch AS ep
-        MERGE (e:Endpoint {fhir_id: ep.fhir_id})
-        ON CREATE SET e.import_tag = ep.import_tag
-        SET e.resource_type = ep.resource_type,
-            e.status = ep.status,
-            e.connection_type = ep.connection_type,
-            e.name = ep.name,
-            e.address = ep.address,
-            e.payload_types = ep.payload_types,
-            e.managing_organization_reference = ep.managing_organization_id,
-            e.identifier_systems = ep.identifier_systems,
-            e.identifier_values = ep.identifier_values
-        RETURN count(e) AS count
-        """
+        # Batch import nodes - use CREATE or MERGE based on mode
+        if self.use_create:
+            query = """
+            UNWIND $batch AS ep
+            CREATE (e:Endpoint {
+                fhir_id: ep.fhir_id,
+                import_tag: ep.import_tag,
+                resource_type: ep.resource_type,
+                status: ep.status,
+                FHIR_address: ep.FHIR_address,
+                Direct_address: ep.Direct_address,
+                rank: ep.rank,
+                identifiers: ep.identifiers,
+                managing_organization_reference: ep.managing_organization_id
+            })
+            RETURN count(e) AS count
+            """
+        else:
+            query = """
+            UNWIND $batch AS ep
+            MERGE (e:Endpoint {fhir_id: ep.fhir_id})
+            ON CREATE SET e.import_tag = ep.import_tag
+            SET e.resource_type = ep.resource_type,
+                e.status = ep.status,
+                e.FHIR_address = ep.FHIR_address,
+                e.Direct_address = ep.Direct_address,
+                e.rank = ep.rank,
+                e.identifiers = ep.identifiers,
+                e.managing_organization_reference = ep.managing_organization_id
+            RETURN count(e) AS count
+            """
         
         result = session.run(query, batch=endpoint_data)
         record = result.single()
@@ -107,6 +110,33 @@ class EndpointImporter(BaseImporter):
         self._create_relationships(session=session, endpoint_data=endpoint_data)
         
         return node_count
+    
+    @staticmethod
+    def _extract_rank(*, resource: Dict[str, Any]) -> Optional[int]:
+        """
+        Extract rank from endpoint extensions.
+        
+        Args:
+            resource: The FHIR Endpoint resource
+        
+        Returns:
+            Rank value or None
+        """
+        extensions = resource.get('extension', [])
+        if not isinstance(extensions, list):
+            extensions = [extensions] if extensions else []
+        
+        for ext in extensions:
+            if not isinstance(ext, dict):
+                continue
+            
+            url = ext.get('url', '')
+            if 'base-ext-endpoint-rank' in url:
+                rank = ext.get('valuePositiveInt')
+                if rank is not None:
+                    return rank
+        
+        return None
     
     @staticmethod
     def _create_relationships(*, session: Session, endpoint_data: List[Dict[str, Any]]) -> None:

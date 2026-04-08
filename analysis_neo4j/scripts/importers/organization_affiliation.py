@@ -4,7 +4,7 @@ OrganizationAffiliation resource importer.
 
 from typing import Dict, Any, List
 from neo4j import Session
-from .base import BaseImporter
+from .base import BaseImporter, _to_json_string
 
 
 class OrganizationAffiliationImporter(BaseImporter):
@@ -33,7 +33,7 @@ class OrganizationAffiliationImporter(BaseImporter):
                 self._log(message=f"Skipping OrganizationAffiliation without id: {resource}")
                 continue
             
-            # Extract identifiers
+            # Extract identifiers as objects
             identifiers = self._extract_identifiers(resource=resource)
             
             # Extract active status
@@ -101,28 +101,45 @@ class OrganizationAffiliationImporter(BaseImporter):
                 'specialties': specialties,
                 'location_ids': location_ids,
                 'endpoint_ids': endpoint_ids,
-                'identifier_systems': identifiers['identifier_systems'],
-                'identifier_values': identifiers['identifier_values'],
+                'identifiers': _to_json_string(obj=identifiers),
                 'import_tag': self.import_tag,
             })
         
-        # Batch import nodes
-        query = """
-        UNWIND $batch AS aff
-        MERGE (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-        ON CREATE SET oa.import_tag = aff.import_tag
-        SET oa.resource_type = aff.resource_type,
-            oa.active = aff.active,
-            oa.organization_reference = aff.organization_id,
-            oa.participating_organization_reference = aff.participating_organization_id,
-            oa.codes = aff.codes,
-            oa.specialties = aff.specialties,
-            oa.location_references = aff.location_ids,
-            oa.endpoint_references = aff.endpoint_ids,
-            oa.identifier_systems = aff.identifier_systems,
-            oa.identifier_values = aff.identifier_values
-        RETURN count(oa) AS count
-        """
+        # Batch import nodes - use CREATE or MERGE based on mode
+        if self.use_create:
+            query = """
+            UNWIND $batch AS aff
+            CREATE (oa:OrganizationAffiliation {
+                fhir_id: aff.fhir_id,
+                import_tag: aff.import_tag,
+                resource_type: aff.resource_type,
+                active: aff.active,
+                organization_reference: aff.organization_id,
+                participating_organization_reference: aff.participating_organization_id,
+                codes: aff.codes,
+                specialties: aff.specialties,
+                location_references: aff.location_ids,
+                endpoint_references: aff.endpoint_ids,
+                identifiers: aff.identifiers
+            })
+            RETURN count(oa) AS count
+            """
+        else:
+            query = """
+            UNWIND $batch AS aff
+            MERGE (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            ON CREATE SET oa.import_tag = aff.import_tag
+            SET oa.resource_type = aff.resource_type,
+                oa.active = aff.active,
+                oa.organization_reference = aff.organization_id,
+                oa.participating_organization_reference = aff.participating_organization_id,
+                oa.codes = aff.codes,
+                oa.specialties = aff.specialties,
+                oa.location_references = aff.location_ids,
+                oa.endpoint_references = aff.endpoint_ids,
+                oa.identifiers = aff.identifiers
+            RETURN count(oa) AS count
+            """
         
         result = session.run(query, batch=affiliation_data)
         record = result.single()
