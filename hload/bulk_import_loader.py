@@ -13,13 +13,54 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 # Add parent directory to path to import util module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from util.ndjson_discovery import find_ndjson_files
+
+
+class HapiInstanceRegistry:
+    """Manages .env file with container instance registry"""
+    
+    ENV_FILE = Path(__file__).parent / ".env"
+    
+    @staticmethod
+    def get_instance(*, name: str) -> Optional[Dict[str, str]]:
+        """
+        Get instance info by name.
+        
+        Args:
+            name: Container name
+            
+        Returns:
+            Instance info dictionary or None if not found
+        """
+        if not HapiInstanceRegistry.ENV_FILE.exists():
+            return None
+        
+        with open(HapiInstanceRegistry.ENV_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Parse pipe-delimited format: NAME|PORT|DATA_DIR|STATUS
+                parts = line.split('|')
+                if len(parts) == 4:
+                    instance_name, port, data_dir, status = parts
+                    if instance_name == name:
+                        return {
+                            'port': port,
+                            'data_dir': data_dir,
+                            'status': status
+                        }
+        
+        return None
 
 
 class BulkImportLoader:
@@ -120,6 +161,30 @@ class BulkImportLoader:
             shutil.rmtree(temp_dir)
     
     @staticmethod
+    def _count_lines(*, file_path: Path) -> int:
+        """
+        Count lines in a file using wc -l.
+        
+        Args:
+            file_path: Path to file
+            
+        Returns:
+            Number of lines in file
+        """
+        try:
+            result = subprocess.run(
+                ['wc', '-l', str(file_path)],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # wc -l output is like "  12345 filename"
+            line_count = int(result.stdout.split()[0])
+            return line_count
+        except (subprocess.CalledProcessError, ValueError, IndexError):
+            return 0
+    
+    @staticmethod
     def _run_bulk_import(
         *,
         cli_path: str,
@@ -127,10 +192,11 @@ class BulkImportLoader:
         target_url: str,
         port: int,
         fhir_version: str,
+        batch_size: int = None,
         verbose: bool = False
-    ) -> subprocess.CompletedProcess:
+    ) -> Tuple[subprocess.CompletedProcess, float]:
         """
-        Execute hapi-fhir-cli bulk-import command.
+        Execute hapi-fhir-cli bulk-import command with timing.
         
         Args:
             cli_path: Path to hapi-fhir-cli executable
@@ -138,10 +204,11 @@ class BulkImportLoader:
             target_url: Target HAPI server URL
             port: Port for CLI temporary server
             fhir_version: FHIR version (e.g., 'r4')
+            batch_size: Batch size for processing resources (optional)
             verbose: Enable verbose logging
             
         Returns:
-            CompletedProcess result
+            Tuple of (CompletedProcess result, elapsed_time in seconds)
             
         Raises:
             subprocess.CalledProcessError: If command fails
@@ -155,17 +222,22 @@ class BulkImportLoader:
             "--target-base", target_url
         ]
         
+        if batch_size is not None:
+            command.extend(["--batch-size", str(batch_size)])
+        
         if verbose:
             print(f"  🔧 Command: {' '.join(command)}")
         
+        start_time = time.time()
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
             check=False  # We'll handle errors manually
         )
+        elapsed_time = time.time() - start_time
         
-        return result
+        return result, elapsed_time
     
     @staticmethod
     def load_resources(
@@ -175,6 +247,7 @@ class BulkImportLoader:
         target_url: str = "http://localhost:8080/fhir",
         port: int = 9090,
         fhir_version: str = "r4",
+        batch_size: int = None,
         cleanup: bool = True,
         verbose: bool = False,
         stop_on_error: bool = True
@@ -188,6 +261,7 @@ class BulkImportLoader:
             target_url: Target HAPI server URL
             port: Port for CLI temporary server
             fhir_version: FHIR version
+            batch_size: Batch size for processing resources (optional)
             cleanup: Whether to cleanup temporary directories
             verbose: Enable verbose logging
             stop_on_error: Stop on first error
@@ -223,6 +297,8 @@ class BulkImportLoader:
         print(f"CLI Path:          {cli_path}")
         print(f"CLI Port:          {port}")
         print(f"FHIR Version:      {fhir_version}")
+        if batch_size is not None:
+            print(f"Batch Size:        {batch_size}")
         print(f"Resource Order:    {', '.join(BulkImportLoader.RESOURCE_ORDER)}")
         print("=" * 80)
         print()
@@ -249,6 +325,7 @@ class BulkImportLoader:
         
         results: Dict[str, bool] = {}
         temp_directories: List[Path] = []
+        performance_stats: List[Dict[str, any]] = []
         
         for resource_type in BulkImportLoader.RESOURCE_ORDER:
             if resource_type not in discovered_files:
@@ -257,7 +334,11 @@ class BulkImportLoader:
                 continue
             
             source_file = discovered_files[resource_type]
+            
+            # Count lines in the file
+            line_count = BulkImportLoader._count_lines(file_path=source_file)
             print(f"📂 Loading {resource_type} from: {source_file.name}")
+            print(f"   📊 File contains {line_count:,} resources")
             
             temp_dir = None
             try:
@@ -288,16 +369,19 @@ class BulkImportLoader:
                     "--source-directory", str(temp_dir),
                     "--target-base", target_url
                 ]
+                if batch_size is not None:
+                    command.extend(["--batch-size", str(batch_size)])
                 print(f"  🔧 Running command:")
                 print(f"     {' '.join(command)}")
                 print(f"  ⏳ Executing bulk import...")
                 
-                result = BulkImportLoader._run_bulk_import(
+                result, elapsed_time = BulkImportLoader._run_bulk_import(
                     cli_path=cli_path,
                     temp_dir=temp_dir,
                     target_url=target_url,
                     port=port,
                     fhir_version=fhir_version,
+                    batch_size=batch_size,
                     verbose=verbose
                 )
                 
@@ -308,10 +392,28 @@ class BulkImportLoader:
                     print(f"\n  ⚠️  Stderr:\n{result.stderr}")
                 
                 if result.returncode == 0:
+                    # Calculate performance metrics
+                    time_per_resource = elapsed_time / line_count if line_count > 0 else 0
+                    resources_per_second = line_count / elapsed_time if elapsed_time > 0 else 0
+                    time_for_1m = (1_000_000 * time_per_resource) / 60  # in minutes
+                    
                     print(f"  ✅ Successfully imported {resource_type}")
+                    print(f"     ⏱️  Upload time: {elapsed_time:.2f} seconds")
+                    print(f"     📈 Speed: {resources_per_second:.2f} resources/second")
+                    print(f"     📊 Time per resource: {time_per_resource*1000:.2f} ms")
+                    print(f"     🚀 Estimated time for 1M resources: {time_for_1m:.2f} minutes ({time_for_1m/60:.2f} hours)")
+                    
                     results[resource_type] = True
+                    performance_stats.append({
+                        'resource_type': resource_type,
+                        'line_count': line_count,
+                        'elapsed_time': elapsed_time,
+                        'resources_per_second': resources_per_second,
+                        'time_per_resource_ms': time_per_resource * 1000
+                    })
                 else:
                     print(f"  ❌ Failed to import {resource_type} (exit code: {result.returncode})")
+                    print(f"     ⏱️  Time before failure: {elapsed_time:.2f} seconds")
                     results[resource_type] = False
                     
                     if stop_on_error:
@@ -355,6 +457,29 @@ class BulkImportLoader:
         print(f"Skipped:    {len(BulkImportLoader.RESOURCE_ORDER) - len(results)}")
         print("=" * 80)
         
+        # Print performance summary
+        if performance_stats:
+            print()
+            print("=" * 80)
+            print("PERFORMANCE SUMMARY")
+            print("=" * 80)
+            
+            total_resources = sum(stat['line_count'] for stat in performance_stats)
+            total_time = sum(stat['elapsed_time'] for stat in performance_stats)
+            
+            if total_time > 0:
+                overall_speed = total_resources / total_time
+                overall_time_per_resource = total_time / total_resources if total_resources > 0 else 0
+                overall_time_for_1m = (1_000_000 * overall_time_per_resource) / 60
+                
+                print(f"Total resources imported: {total_resources:,}")
+                print(f"Total time: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
+                print(f"Overall speed: {overall_speed:.2f} resources/second")
+                print(f"Overall time per resource: {overall_time_per_resource*1000:.2f} ms")
+                print(f"Estimated time for 1M resources: {overall_time_for_1m:.2f} minutes ({overall_time_for_1m/60:.2f} hours)")
+            
+            print("=" * 80)
+        
         if failed > 0:
             print("\n⚠️  Some resources failed to import. Check the logs above for details.")
         else:
@@ -390,11 +515,17 @@ Examples:
         help="Path to hapi-fhir-cli executable (default: hapi-fhir-cli in PATH)"
     )
     
-    parser.add_argument(
+    # Create mutually exclusive group for --name or --target-url
+    target_group = parser.add_mutually_exclusive_group(required=False)
+    target_group.add_argument(
+        "--name",
+        type=str,
+        help="Container name (port will be looked up from registry)"
+    )
+    target_group.add_argument(
         "--target-url",
         type=str,
-        default="http://localhost:8080/fhir",
-        help="Target HAPI FHIR server URL (default: http://localhost:8080/fhir)"
+        help="Target HAPI FHIR server URL (default: http://localhost:8080/fhir if neither --name nor --target-url specified)"
     )
     
     parser.add_argument(
@@ -410,6 +541,12 @@ Examples:
         default="r4",
         choices=["dstu2", "dstu3", "r4", "r5"],
         help="FHIR version (default: r4)"
+    )
+    
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Batch size for processing resources (default: hapi-fhir-cli default)"
     )
     
     parser.add_argument(
@@ -432,13 +569,34 @@ Examples:
     
     args = parser.parse_args()
     
+    # Determine target URL
+    target_url = None
+    if args.name:
+        # Look up instance from registry
+        instance = HapiInstanceRegistry.get_instance(name=args.name)
+        if not instance:
+            print(f"❌ Error: Instance '{args.name}' not found in registry.", file=sys.stderr)
+            print(f"   Use --target-url instead, or run 'python hload/hapi_manager.py list' to see available instances.", file=sys.stderr)
+            sys.exit(1)
+        port = instance['port']
+        target_url = f"http://localhost:{port}/fhir"
+        print(f"📦 Using instance '{args.name}' on port {port}")
+        print(f"   Target URL: {target_url}")
+        print()
+    elif args.target_url:
+        target_url = args.target_url
+    else:
+        # Default
+        target_url = "http://localhost:8080/fhir"
+    
     try:
         results = BulkImportLoader.load_resources(
             source_dir=args.source_dir,
             cli_path=args.cli_path,
-            target_url=args.target_url,
+            target_url=target_url,
             port=args.port,
             fhir_version=args.fhir_version,
+            batch_size=args.batch_size,
             cleanup=not args.no_cleanup,
             verbose=args.verbose,
             stop_on_error=not args.continue_on_error

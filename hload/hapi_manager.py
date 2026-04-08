@@ -437,6 +437,8 @@ rm -f "{temp_b64}"
             cmd.append('--continue-on-error')
         if kwargs.get('cli_path'):
             cmd.extend(['--cli-path', kwargs['cli_path']])
+        if kwargs.get('batch_size') is not None:
+            cmd.extend(['--batch-size', str(kwargs['batch_size'])])
         
         print(f"🔧 Running: {' '.join(cmd)}")
         print()
@@ -635,6 +637,11 @@ Examples:
         help='Path to hapi-fhir-cli executable (default: hapi-fhir-cli in PATH)'
     )
     bulk_parser.add_argument(
+        '--batch-size',
+        type=int,
+        help='Batch size for processing resources (default: hapi-fhir-cli default)'
+    )
+    bulk_parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging'
@@ -703,6 +710,7 @@ Examples:
                 name=args.name,
                 port=args.port,
                 cli_path=args.cli_path,
+                batch_size=args.batch_size,
                 verbose=args.verbose,
                 no_cleanup=args.no_cleanup,
                 continue_on_error=args.continue_on_error
