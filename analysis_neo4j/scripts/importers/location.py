@@ -116,12 +116,14 @@ class LocationImporter(BaseImporter):
                 'endpoint_ids': endpoint_ids,
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
+                'import_tag': self.import_tag,
             })
         
         # Batch import nodes
         query = """
         UNWIND $batch AS loc
         MERGE (l:Location {fhir_id: loc.fhir_id})
+        ON CREATE SET l.import_tag = loc.import_tag
         SET l.resource_type = loc.resource_type,
             l.status = loc.status,
             l.name = loc.name,

@@ -4,6 +4,7 @@ Base importer class with common functionality for all FHIR resource importers.
 
 import json
 import sys
+import time
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from neo4j import GraphDatabase, Session
@@ -25,7 +26,7 @@ class BaseImporter:
     RESOURCE_TYPE = "Base"
     NODE_LABEL = "Base"
     
-    def __init__(self, *, neo4j_uri: str, neo4j_user: str, neo4j_password: str):
+    def __init__(self, *, neo4j_uri: str, neo4j_user: str, neo4j_password: str, import_tag: Optional[str] = None):
         """
         Initialize the importer.
         
@@ -33,8 +34,10 @@ class BaseImporter:
             neo4j_uri: Neo4j connection URI
             neo4j_user: Neo4j username
             neo4j_password: Neo4j password
+            import_tag: Optional tag to identify this import run (only set on new nodes)
         """
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+        self.import_tag = import_tag
     
     def close(self) -> None:
         """Close the Neo4j driver connection."""
@@ -212,10 +215,58 @@ class BaseImporter:
         
         print(f"Importing {len(records)} {self.RESOURCE_TYPE} resources...")
         
+        # Track timing for this resource type
+        start_time = time.time()
+        
         with self.driver.session() as session:
             for i in range(0, len(records), batch_size):
                 batch = records[i:i + batch_size]
                 count = self.import_batch(session=session, batch=batch)
-                print(f"  Processed {i + len(batch)}/{len(records)} ({count} nodes created/updated)")
+                
+                # Calculate timing information
+                records_processed = i + len(batch)
+                elapsed_time = time.time() - start_time
+                time_per_record = elapsed_time / records_processed if records_processed > 0 else 0
+                
+                # Format time displays
+                elapsed_str = self._format_time(seconds=elapsed_time)
+                time_per_record_str = f"{time_per_record:.4f}s" if time_per_record >= 0.0001 else f"{time_per_record*1000:.2f}ms"
+                
+                print(f"  Processed {records_processed}/{len(records)} ({count} nodes created/updated) | "
+                      f"Time so far: {elapsed_str} | Time per record: {time_per_record_str}")
         
+        # Print summary when resource type import is complete
+        total_time = time.time() - start_time
+        total_time_str = self._format_time(seconds=total_time)
+        avg_time_per_record = total_time / len(records) if len(records) > 0 else 0
+        avg_time_str = f"{avg_time_per_record:.4f}s" if avg_time_per_record >= 0.0001 else f"{avg_time_per_record*1000:.2f}ms"
+        
+        print(f"\n{'='*60}")
         print(f"Completed import of {self.RESOURCE_TYPE}")
+        print(f"Total records: {len(records)}")
+        print(f"Total time: {total_time_str}")
+        print(f"Average time per record: {avg_time_str}")
+        print(f"{'='*60}\n")
+    
+    @staticmethod
+    def _format_time(*, seconds: float) -> str:
+        """
+        Format time in seconds to a human-readable string.
+        
+        Args:
+            seconds: Time in seconds
+        
+        Returns:
+            Formatted time string (e.g., "1h 23m 45s" or "2m 30s" or "45s")
+        """
+        if seconds < 60:
+            return f"{seconds:.2f}s"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = seconds % 60
+            return f"{minutes}m {secs:.2f}s"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = seconds % 60
+            return f"{hours}h {minutes}m {secs:.2f}s"

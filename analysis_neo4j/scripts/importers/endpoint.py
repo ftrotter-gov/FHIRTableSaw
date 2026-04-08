@@ -79,12 +79,14 @@ class EndpointImporter(BaseImporter):
                 'managing_organization_id': managing_org_id,
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
+                'import_tag': self.import_tag,
             })
         
         # Batch import nodes
         query = """
         UNWIND $batch AS ep
         MERGE (e:Endpoint {fhir_id: ep.fhir_id})
+        ON CREATE SET e.import_tag = ep.import_tag
         SET e.resource_type = ep.resource_type,
             e.status = ep.status,
             e.connection_type = ep.connection_type,

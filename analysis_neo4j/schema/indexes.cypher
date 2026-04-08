@@ -90,3 +90,26 @@ FOR (oa:OrganizationAffiliation) ON (oa.participating_organization_reference);
 
 CREATE INDEX reference_primary_org IF NOT EXISTS
 FOR (oa:OrganizationAffiliation) ON (oa.organization_reference);
+
+// ============================================
+// Indexes for Import Tracking
+// ============================================
+
+// Import tag indexes for filtering by import run
+CREATE INDEX import_tag_practitioner IF NOT EXISTS
+FOR (p:Practitioner) ON (p.import_tag);
+
+CREATE INDEX import_tag_organization IF NOT EXISTS
+FOR (o:Organization) ON (o.import_tag);
+
+CREATE INDEX import_tag_location IF NOT EXISTS
+FOR (l:Location) ON (l.import_tag);
+
+CREATE INDEX import_tag_endpoint IF NOT EXISTS
+FOR (e:Endpoint) ON (e.import_tag);
+
+CREATE INDEX import_tag_practitioner_role IF NOT EXISTS
+FOR (pr:PractitionerRole) ON (pr.import_tag);
+
+CREATE INDEX import_tag_organization_affiliation IF NOT EXISTS
+FOR (oa:OrganizationAffiliation) ON (oa.import_tag);

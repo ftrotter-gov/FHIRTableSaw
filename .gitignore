@@ -235,3 +235,5 @@ magid_test.sh
 
 # hapi-fhir-cli bulk-import temporary directories
 .bulk_import_tmp_*/
+
+data/*

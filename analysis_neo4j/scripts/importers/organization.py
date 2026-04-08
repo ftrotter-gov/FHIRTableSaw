@@ -116,12 +116,14 @@ class OrganizationImporter(BaseImporter):
                 'npi': identifiers['npi'],
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
+                'import_tag': self.import_tag,
             })
         
         # Batch import nodes
         query = """
         UNWIND $batch AS org
         MERGE (o:Organization {fhir_id: org.fhir_id})
+        ON CREATE SET o.import_tag = org.import_tag
         SET o.resource_type = org.resource_type,
             o.name = org.name,
             o.active = org.active,

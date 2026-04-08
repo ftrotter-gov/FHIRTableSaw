@@ -98,12 +98,14 @@ class PractitionerRoleImporter(BaseImporter):
                 'npi': identifiers['npi'],
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
+                'import_tag': self.import_tag,
             })
         
         # Batch import nodes
         query = """
         UNWIND $batch AS role
         MERGE (pr:PractitionerRole {fhir_id: role.fhir_id})
+        ON CREATE SET pr.import_tag = role.import_tag
         SET pr.resource_type = role.resource_type,
             pr.active = role.active,
             pr.practitioner_reference = role.practitioner_id,

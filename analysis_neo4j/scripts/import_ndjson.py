@@ -17,7 +17,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
-from typing import Dict, Type, List
+from typing import Dict, Type, List, Optional
 import glob
 
 # Import all resource importers
@@ -161,13 +161,14 @@ def load_neo4j_config() -> Dict[str, str]:
     return config
 
 
-def import_resource_files(*, files: Dict[str, Path], batch_size: int) -> None:
+def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag: Optional[str] = None) -> None:
     """
     Import all discovered NDJSON files into Neo4j.
     
     Args:
         files: Dictionary mapping resource type to file path
         batch_size: Number of records to process per batch
+        import_tag: Optional tag to identify this import run (only set on new nodes)
     """
     if not files:
         print("No FHIR NDJSON files found to import.")
@@ -207,7 +208,8 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int) -> None:
             importer = importer_class(
                 neo4j_uri=config['uri'],
                 neo4j_user=config['user'],
-                neo4j_password=config['password']
+                neo4j_password=config['password'],
+                import_tag=import_tag
             )
             
             importer.import_file(filepath=filepath, batch_size=batch_size)
@@ -237,6 +239,9 @@ Examples:
   
   # Use custom batch size
   python import_ndjson.py /data/fhir --batch-size 500
+  
+  # Tag this import run (useful for tracking data sources)
+  python import_ndjson.py /data/fhir --import-tag "initial_load_2026"
   
   # Load environment from .env file (recommended)
   export NEO4J_PASSWORD=your_password
@@ -275,6 +280,13 @@ File Naming:
         help='Number of records to process per batch (default: 1000)'
     )
     
+    parser.add_argument(
+        '--import-tag',
+        type=str,
+        default=None,
+        help='Optional tag to identify this import run (only applied to newly created nodes)'
+    )
+    
     args = parser.parse_args()
     
     # Load .env file if it exists
@@ -300,7 +312,8 @@ File Naming:
     # Import files
     import_resource_files(
         files=files,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        import_tag=args.import_tag
     )
 
 

@@ -70,12 +70,14 @@ class PractitionerImporter(BaseImporter):
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
                 'qualifications': qualifications,
+                'import_tag': self.import_tag,
             })
         
         # Batch import using MERGE for idempotency
         query = """
         UNWIND $batch AS prac
         MERGE (p:Practitioner {fhir_id: prac.fhir_id})
+        ON CREATE SET p.import_tag = prac.import_tag
         SET p.resource_type = prac.resource_type,
             p.name = prac.name,
             p.active = prac.active,

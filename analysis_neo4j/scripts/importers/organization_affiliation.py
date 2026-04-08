@@ -103,12 +103,14 @@ class OrganizationAffiliationImporter(BaseImporter):
                 'endpoint_ids': endpoint_ids,
                 'identifier_systems': identifiers['identifier_systems'],
                 'identifier_values': identifiers['identifier_values'],
+                'import_tag': self.import_tag,
             })
         
         # Batch import nodes
         query = """
         UNWIND $batch AS aff
         MERGE (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+        ON CREATE SET oa.import_tag = aff.import_tag
         SET oa.resource_type = aff.resource_type,
             oa.active = aff.active,
             oa.organization_reference = aff.organization_id,
