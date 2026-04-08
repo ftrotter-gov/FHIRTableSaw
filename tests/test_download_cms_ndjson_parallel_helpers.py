@@ -62,9 +62,30 @@ def test_resource_has_in_progress_state(tmp_path):
     # No state file.
     assert m._resource_has_in_progress_state(output_dir=tmp_path, resource_type="Practitioner") is False
 
-    # Create a fake state.json.
+
+def test_write_expected_total_to_state(tmp_path):
+    m = _load_download_cms_ndjson_module()
+
+    m._write_expected_total_to_state(output_dir=tmp_path, resource_type="Practitioner", expected_total=123)
+
+    # When no state.json exists yet, we write a sidecar expected_total.json.
+    exp_path = tmp_path / "download_state" / "Practitioner" / "expected_total.json"
+    assert exp_path.exists()
+    exp_payload = __import__("json").loads(exp_path.read_text(encoding="utf-8"))
+    assert exp_payload["expected_total"] == 123
+
+    # If state.json exists, we update it in-place.
     state_dir = tmp_path / "download_state" / "Practitioner"
     state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / "state.json").write_text(
+        '{"resource_type":"Practitioner","output_file":"practitioner.ndjson","status":"in_progress"}\n',
+        encoding="utf-8",
+    )
+    m._write_expected_total_to_state(output_dir=tmp_path, resource_type="Practitioner", expected_total=456)
+    payload2 = __import__("json").loads((state_dir / "state.json").read_text(encoding="utf-8"))
+    assert payload2["total_hint"] == 456
+
+    # Create a fake state.json.
     (state_dir / "state.json").write_text('{"status": "in_progress"}\n', encoding="utf-8")
 
     assert m._resource_has_in_progress_state(output_dir=tmp_path, resource_type="Practitioner") is True

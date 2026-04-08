@@ -55,6 +55,11 @@ def _ensure_src_on_path() -> None:
 
 _ensure_src_on_path()
 
+# Add repo root to sys.path so we can import repo-root utilities like `util/*`.
+repo_root = Path(__file__).resolve().parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 # Check dependencies before importing project modules
 try:
     from check_dependencies import require_dependencies  # noqa: E402
@@ -74,6 +79,11 @@ RESOURCE_TYPES: tuple[str, ...] = (
     "Endpoint",
     "Location",
 )
+
+
+# If the server-reported count endpoint underestimates the true dataset size by
+# more than this many resources, we stop early to avoid unbounded downloads.
+SERVER_ESTIMATE_MAX_OVERRUN = 100_000
 
 
 def _snake_file_name(resource_type: str) -> str:
@@ -277,6 +287,10 @@ class ResourceDownloadState:
     # Best-effort hint for the full resource total (from Bundle.total or wrapper count).
     # Persisted so resumed downloads can make smarter decisions.
     total_hint: int | None = None
+    # Server-reported total from count-style endpoints (if available).
+    # This should not be overwritten by Bundle.total because the requirement is
+    # to never "guess" totals.
+    expected_total: int | None = None
     completed_at: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -293,6 +307,7 @@ class ResourceDownloadState:
             "assembled_pages": self.assembled_pages,
             "assembled_bytes": self.assembled_bytes,
             "total_hint": self.total_hint,
+            "expected_total": self.expected_total,
             "completed_at": self.completed_at,
         }
 
@@ -311,6 +326,7 @@ class ResourceDownloadState:
             assembled_pages=int(payload.get("assembled_pages", 0)),
             assembled_bytes=int(payload.get("assembled_bytes", 0)),
             total_hint=payload.get("total_hint"),
+            expected_total=payload.get("expected_total"),
             completed_at=payload.get("completed_at"),
         )
 
@@ -389,6 +405,16 @@ def _resource_state_path(*, output_dir: Path, resource_type: str) -> Path:
     return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "state.json"
 
 
+def _resource_expected_total_path(*, output_dir: Path, resource_type: str) -> Path:
+    """Sidecar file written by higher-level orchestrators.
+
+    download_cms_ndjson.py may write this before the downloader has created a
+    full state.json.
+    """
+
+    return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "expected_total.json"
+
+
 def _resource_pages_dir(*, output_dir: Path, resource_type: str) -> Path:
     return _resource_state_dir(output_dir=output_dir, resource_type=resource_type) / "pages"
 
@@ -410,9 +436,63 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 def _load_or_init_resource_state(*, output_dir: Path, resource_type: str, count: int) -> ResourceDownloadState:
     state_path = _resource_state_path(output_dir=output_dir, resource_type=resource_type)
+
+    # Sidecar expected total written by download orchestrators.
+    seed_expected_total: int | None = None
+    try:
+        exp_path = _resource_expected_total_path(output_dir=output_dir, resource_type=resource_type)
+        if exp_path.exists():
+            exp_payload = json.loads(exp_path.read_text(encoding="utf-8"))
+            if isinstance(exp_payload, dict) and isinstance(exp_payload.get("expected_total"), int):
+                seed_expected_total = int(exp_payload["expected_total"])
+    except Exception:  # noqa: BLE001
+        seed_expected_total = None
+
     if state_path.exists():
-        with state_path.open("r", encoding="utf-8") as f:
-            return ResourceDownloadState.from_json(json.load(f))
+        try:
+            with state_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict):
+                raise ValueError("state.json was not a JSON object")
+            # Some callers (e.g. higher-level download orchestrators) may persist
+            # partial state, such as only `total_hint`. If required fields are
+            # missing, treat it as an initialization seed.
+            if "resource_type" not in payload or "output_file" not in payload:
+                seed_total = payload.get("total_hint")
+                st = ResourceDownloadState(
+                    version=1,
+                    resource_type=resource_type,
+                    output_file=_snake_file_name(resource_type),
+                    status="in_progress",
+                    request_url=resource_type,
+                    request_params={
+                        "_count": str(count),
+                        "page_size": str(count),
+                        "_total": "none",
+                    },
+                    first_request=True,
+                    pages_completed=0,
+                    resources_written=0,
+                    assembled_pages=0,
+                    assembled_bytes=0,
+                    total_hint=(int(seed_total) if isinstance(seed_total, int) else None),
+                    expected_total=(int(seed_expected_total) if isinstance(seed_expected_total, int) else None),
+                )
+                _save_resource_state(output_dir=output_dir, state=st)
+                return st
+
+            st2 = ResourceDownloadState.from_json(payload)
+            if seed_expected_total is not None and st2.expected_total is None:
+                st2.expected_total = int(seed_expected_total)
+                # Keep total_hint aligned with expected_total unless the operator
+                # explicitly set something else.
+                if st2.total_hint is None:
+                    st2.total_hint = int(seed_expected_total)
+                _save_resource_state(output_dir=output_dir, state=st2)
+            return st2
+        except Exception:  # noqa: BLE001
+            # Corrupt/unreadable state -> start fresh.
+            pass
 
     return ResourceDownloadState(
         version=1,
@@ -430,6 +510,8 @@ def _load_or_init_resource_state(*, output_dir: Path, resource_type: str, count:
         resources_written=0,
         assembled_pages=0,
         assembled_bytes=0,
+        total_hint=seed_expected_total,
+        expected_total=seed_expected_total,
     )
 
 
@@ -923,13 +1005,15 @@ def fetch_resources(
         first_request = state.first_request
 
         # Best-effort: some servers behave badly when requesting a page size
-        # larger than the remaining resources. If we know the total (from a prior
-        # page) or the operator set a hard_limit, shrink _count/page_size for the
-        # final request.
+        # larger than the remaining resources.
+        #
+        # We prefer a server-provided count endpoint expectation (state.expected_total)
+        # over Bundle.total, because we never want to "guess" totals.
         remaining_by_total: int | None = None
-        if state.total_hint is not None:
+        effective_total = state.expected_total if state.expected_total is not None else state.total_hint
+        if effective_total is not None:
             try:
-                remaining_by_total = int(state.total_hint) - int(seen)
+                remaining_by_total = int(effective_total) - int(seen)
             except Exception:  # noqa: BLE001
                 remaining_by_total = None
         remaining_by_limit: int | None = None
@@ -1114,6 +1198,8 @@ def fetch_resources(
             raise
 
         # Some servers provide helpful totals in the wrapper.
+        # NOTE: if we already have a server-provided expected_total (from a count
+        # endpoint), we deliberately do NOT overwrite it.
         total_hint = None
         if isinstance(payload, dict) and isinstance(payload.get("count"), int):
             total_hint = int(payload["count"])
@@ -1168,8 +1254,9 @@ def fetch_resources(
         if total_hint is None and isinstance(bundle.get("total"), int):
             total_hint = int(bundle["total"])
 
-        # Persist total_hint so resumed downloads can adjust the final request.
-        if total_hint is not None and state.total_hint != total_hint:
+        # Persist total_hint so resumed downloads can adjust the final request,
+        # but only if we don't already have an authoritative expected_total.
+        if state.expected_total is None and total_hint is not None and state.total_hint != total_hint:
             state.total_hint = int(total_hint)
             _save_resource_state(output_dir=output_dir, state=state)
 
@@ -1191,6 +1278,17 @@ def fetch_resources(
         page_resources: list[dict[str, Any]] = []
         hard_limit_reached = False
         for res in entries:
+            # Safety: if the server has *more* results than it claimed via count
+            # endpoint by a large margin, stop to avoid unbounded downloads.
+            if state.expected_total is not None:
+                overrun = int(seen) - int(state.expected_total)
+                if overrun >= int(SERVER_ESTIMATE_MAX_OVERRUN):
+                    print(
+                        "WARNING: The server appears to have more data than it estimated, "
+                        f"stopping at {SERVER_ESTIMATE_MAX_OVERRUN} more"
+                    )
+                    hard_limit_reached = True
+                    break
             if hard_limit is not None and seen >= hard_limit:
                 hard_limit_reached = True
                 break

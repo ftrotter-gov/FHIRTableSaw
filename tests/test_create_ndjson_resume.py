@@ -319,3 +319,62 @@ def test_fetch_resources_last_page_off_by_one_fallback(tmp_path, monkeypatch):
     # We should have tried 51 first (with page_size), retried 51 without
     # page_size (parameter conflict handling), then fallen back to 50.
     assert tried_counts[:3] == ["51", "51", "50"]
+
+
+def test_fetch_resources_stops_if_server_has_more_than_expected_total_plus_overrun(tmp_path, monkeypatch, capsys):
+    m = _load_create_ndjson_module()
+
+    # Make the threshold small for the test.
+    monkeypatch.setattr(m, "SERVER_ESTIMATE_MAX_OVERRUN", 2)
+
+    # Seed state such that expected_total is known (from count endpoint).
+    state = m._load_or_init_resource_state(output_dir=tmp_path, resource_type="Practitioner", count=1000)
+    state.expected_total = 10
+    state.total_hint = 10
+    state.resources_written = 12  # already 2 over expected
+    m._save_resource_state(output_dir=tmp_path, state=state)
+
+    class _FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.status_code = 200
+            self.headers = {"Content-Type": "application/fhir+json"}
+
+        def json(self):
+            return self._payload
+
+    def fake_request_with_retry(client, method, url, *, params, retry, log_fn, context, curl_debug, curl_auth):
+        return _FakeResponse(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {"resource": {"resourceType": "Practitioner", "id": "p1"}},
+                    {"resource": {"resourceType": "Practitioner", "id": "p2"}},
+                    {"resource": {"resourceType": "Practitioner", "id": "p3"}},
+                ],
+                "link": [{"relation": "next", "url": "https://example.test/fhir/Practitioner?_getpages=abc"}],
+            }
+        )
+
+    monkeypatch.setattr(m, "_request_with_retry", fake_request_with_retry)
+
+    pages = m.fetch_resources(
+        client=object(),
+        output_dir=tmp_path,
+        resource_type="Practitioner",
+        count=1000,
+        hard_limit=None,
+        retry=m.RetryConfig(),
+        log_dir=tmp_path / "log",
+        url_print=m.UrlPrintConfig(print_urls=False),
+        curl_debug=m.CurlDebugConfig(curl_on_error=False),
+        curl_auth=None,
+    )
+
+    page = next(pages)
+    # We were already at the overrun threshold; should stop without yielding any resources.
+    assert page.resources == []
+    assert page.next_url is None
+
+    captured = capsys.readouterr()
+    assert "The server appears to have more data than it estimated" in (captured.out + captured.err)

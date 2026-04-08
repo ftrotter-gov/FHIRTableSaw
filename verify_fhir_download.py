@@ -50,6 +50,11 @@ def _ensure_src_on_path() -> None:
 
 _ensure_src_on_path()
 
+# Add repo root to sys.path so we can import repo-root utilities like `util/*`.
+repo_root = Path(__file__).resolve().parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 from fhir_tablesaw_3tier.env import get_fhir_basic_auth, load_dotenv  # noqa: E402
 
 
@@ -64,84 +69,7 @@ class NdjsonStats:
     missing_id_count: int
 
 
-@dataclass(frozen=True)
-class ApiCount:
-    resource_type: str
-    expected_total: int | None
-    method: str
-    count_url: str | None
-    curl_count_cmd: str | None
-    elapsed_seconds: float | None
-    attempts: int
-
-
-def _get_json_with_retries(
-    *,
-    client: httpx.Client,
-    resource_type: str,
-    params: dict[str, str],
-    count_url: str,
-    max_attempts: int,
-    initial_timeout_seconds: float,
-) -> tuple[dict[str, Any], int]:
-    """GET+JSON parse with retry and exponential timeout.
-
-    Requirements:
-    - Retry each URL up to `max_attempts` times.
-    - First attempt uses `initial_timeout_seconds`.
-    - Timeout doubles after every failed attempt.
-
-    Returns:
-      (payload_json, attempts_used)
-    """
-
-    timeout = float(initial_timeout_seconds)
-    timeout_cap = float(initial_timeout_seconds)
-    last_error: str | None = None
-
-    for attempt in range(1, max(int(max_attempts), 1) + 1):
-        try:
-            r = client.get(resource_type, params=params, timeout=timeout)
-            r.raise_for_status()
-            payload = r.json()
-            if not isinstance(payload, dict):
-                raise ValueError(f"Expected JSON object, got {type(payload).__name__}")
-            return payload, attempt
-        except Exception as ex:  # noqa: BLE001
-            last_error = f"{type(ex).__name__}: {ex}"
-            if attempt >= max_attempts:
-                break
-            next_timeout = min(timeout * 2, timeout_cap)
-            print(
-                f"WARN: count request failed for {resource_type} (attempt {attempt}/{max_attempts}, timeout={timeout:.0f}s) "
-                f"url={count_url} error={last_error} -> retrying with timeout={next_timeout:.0f}s",
-                file=sys.stderr,
-            )
-            timeout = next_timeout
-
-    raise RuntimeError(
-        f"count request failed for {resource_type} after {max_attempts} attempts: url={count_url} error={last_error}"
-    )
-
-
-def _build_count_url(*, client: httpx.Client, resource_type: str, params: dict[str, str]) -> str:
-    """Build the exact request URL (without credentials) used to fetch counts."""
-
-    # httpx.URL join keeps base path (e.g. /fhir/) and appends resource_type.
-    base = client.base_url.join(resource_type)
-    # Merge query params.
-    return str(base.copy_merge_params(params))
-
-
-def _build_curl_count_cmd(*, count_url: str) -> str:
-    """Build a safe, ready-to-run curl command (no embedded secrets).
-
-    NOTE: We intentionally do NOT embed the real username/password.
-    """
-
-    # Keep the command easy to paste, while avoiding embedded quotes that get messy in CSV.
-    # We still do NOT embed real credentials.
-    return f"curl -sS -u $FHIR_API_USERNAME:$FHIR_API_PASSWORD -H Accept:application/fhir+json '{count_url}'"
+from util.fhir_counts import ApiCount, fetch_expected_total  # noqa: E402
 
 
 def _resource_type_from_filename(p: Path) -> str:
@@ -221,93 +149,7 @@ def _resource_type_matches(*, resource_type: str, obj: Any) -> bool:
     return isinstance(rt, str) and rt == resource_type
 
 
-def _extract_total_from_bundle(payload: Any) -> int | None:
-    if not isinstance(payload, dict):
-        return None
-
-    # Some servers wrap a Bundle in an envelope; look for Bundle.total.
-    if payload.get("resourceType") == "Bundle" and isinstance(payload.get("total"), int):
-        return int(payload["total"])
-
-    # CMS-like wrappers sometimes include "count".
-    if isinstance(payload.get("count"), int):
-        return int(payload["count"])
-
-    # Look a little deeper for a nested Bundle.
-    for key in ("results", "result", "bundle", "data"):
-        child = payload.get(key)
-        if isinstance(child, dict):
-            t = _extract_total_from_bundle(child)
-            if t is not None:
-                return t
-    return None
-
-
-def fetch_expected_total(
-    *,
-    client: httpx.Client,
-    resource_type: str,
-    max_attempts_per_url: int = 6,
-    initial_timeout_seconds: float = 120.0,
-) -> ApiCount:
-    """Fetch expected total for a resource type using CMS-friendly methods.
-
-    Order:
-      1) ?_summary=count (standard, efficient)
-      2) ?_count=0&_total=accurate (fallback)
-      3) ?_count=1&_total=accurate (last resort)
-    """
-
-    attempts: list[tuple[str, dict[str, str]]] = [
-        ("_summary=count", {"_summary": "count"}),
-        # Some servers accept either 'accurate' or 'none'. For CMS we want a real total.
-        ("_count=0&_total=accurate", {"_count": "0", "_total": "accurate"}),
-        ("_count=1&_total=accurate", {"_count": "1", "_total": "accurate"}),
-    ]
-
-    last_error: str | None = None
-    started = time.perf_counter()
-    http_attempts = 0
-
-    for method, params in attempts:
-        try:
-            count_url = _build_count_url(client=client, resource_type=resource_type, params=params)
-            payload, used = _get_json_with_retries(
-                client=client,
-                resource_type=resource_type,
-                params=params,
-                count_url=count_url,
-                max_attempts=int(max_attempts_per_url),
-                initial_timeout_seconds=float(initial_timeout_seconds),
-            )
-            http_attempts += int(used)
-            total = _extract_total_from_bundle(payload)
-            if total is not None:
-                return ApiCount(
-                    resource_type=resource_type,
-                    expected_total=total,
-                    method=method,
-                    count_url=count_url,
-                    curl_count_cmd=_build_curl_count_cmd(count_url=count_url),
-                    elapsed_seconds=(time.perf_counter() - started),
-                    attempts=http_attempts,
-                )
-            last_error = f"No total found in response JSON for method={method}"
-        except Exception as ex:  # noqa: BLE001
-            last_error = f"{type(ex).__name__}: {ex}"
-            continue
-
-    # We intentionally return expected_total=None so the caller can still run
-    # integrity/dup checks but will mark overall status as FAIL.
-    return ApiCount(
-        resource_type=resource_type,
-        expected_total=None,
-        method=f"FAILED: {last_error}",
-        count_url=None,
-        curl_count_cmd=None,
-        elapsed_seconds=(time.perf_counter() - started),
-        attempts=http_attempts,
-    )
+## NOTE: count fetching moved to util.fhir_counts.fetch_expected_total
 
 
 def _fmt_int(x: int | None) -> str:

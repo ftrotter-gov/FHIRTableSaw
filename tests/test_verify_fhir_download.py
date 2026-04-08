@@ -43,7 +43,7 @@ def test_compute_ndjson_stats_counts_unique_and_duplicates(tmp_path: Path):
 
 
 def test_extract_total_from_bundle_variants():
-    from verify_fhir_download import _extract_total_from_bundle
+    from util.fhir_counts import _extract_total_from_bundle
 
     assert _extract_total_from_bundle({"resourceType": "Bundle", "total": 12}) == 12
     assert _extract_total_from_bundle({"count": 34}) == 34
@@ -53,7 +53,7 @@ def test_extract_total_from_bundle_variants():
 
 
 def test_fetch_expected_total_prefers_summary_count():
-    from verify_fhir_download import fetch_expected_total
+    from util.fhir_counts import fetch_expected_total
 
     def handler(request: httpx.Request) -> httpx.Response:
         # Ensure first attempt is _summary=count
@@ -70,7 +70,7 @@ def test_fetch_expected_total_prefers_summary_count():
 
 
 def test_fetch_expected_total_falls_back_to_total_accurate():
-    from verify_fhir_download import fetch_expected_total
+    from util.fhir_counts import fetch_expected_total
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.params.get("_summary") == "count":

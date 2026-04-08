@@ -24,6 +24,8 @@ import re
 import json
 from pathlib import Path
 
+import httpx
+
 
 # Ensure repo src/ is importable
 REPO_ROOT = Path(__file__).resolve().parent
@@ -31,7 +33,13 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+# Add repo root to sys.path so we can import repo-root utilities like `util/*`.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from fhir_tablesaw_3tier.env import load_dotenv
+
+from util.fhir_counts import fetch_expected_total
 
 
 # CMS internal FHIR server - this is the actual CMS server, not the test server
@@ -133,6 +141,48 @@ def _resource_has_in_progress_state(*, output_dir: Path, resource_type: str) -> 
         # If state is corrupt/unreadable, do not assume resumable.
         return False
     return str(payload.get("status") or "").lower() == "in_progress"
+
+
+def _write_expected_total_to_state(*, output_dir: Path, resource_type: str, expected_total: int) -> None:
+    """Persist server-reported expected_total into create_ndjson_from_api's state.json.
+
+    This lets the resumable downloader (create_ndjson_from_api.py) avoid guessing
+    totals from paging responses.
+    """
+
+    state_path = _resource_state_path(output_dir=output_dir, resource_type=resource_type)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+
+    payload: dict[str, object] | None = None
+    if state_path.exists():
+        try:
+            loaded = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:  # noqa: BLE001
+            payload = None
+
+    # If there is no existing state, do NOT create one here.
+    # create_ndjson_from_api.py owns the state schema; it can ingest a
+    # sidecar expectation file and write the full state.json itself.
+    if payload is None:
+        exp_path = state_path.with_name("expected_total.json")
+        tmp = exp_path.with_name(exp_path.name + ".tmp")
+        tmp.write_text(
+            json.dumps({"expected_total": int(expected_total)}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, exp_path)
+        return
+
+    payload["total_hint"] = int(expected_total)
+    payload["expected_total"] = int(expected_total)
+    tmp_state = state_path.with_name(state_path.name + ".tmp")
+    tmp_state.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp_state, state_path)
 
 
 def _reset_resource_download_state(*, output_dir: Path, resource_type: str) -> None:
@@ -478,98 +528,122 @@ def main(argv: list[str] | None = None) -> int:
         extra_redownload_attempts = max(int(args.max_redownload_attempts), 0)
         allow_redownload = extra_redownload_attempts > 0
 
-        for rt in resource_types:
-            # Skip download if file already exists and verifies.
-            ndjson_path = output_dir / _snake_file_name(rt)
+        # Fetch server-reported totals once per run (per resource type), and
+        # persist them into download_state so the resumable downloader never has
+        # to guess what the totals should be.
+        with httpx.Client(
+            base_url=str(fhir_url).rstrip("/") + "/",
+            auth=(username, password),
+            headers={"Accept": "application/fhir+json"},
+            timeout=None,
+            follow_redirects=True,
+        ) as count_client:
 
-            def _download_once() -> int:
-                cmd = _build_create_ndjson_cmd(
-                    fhir_url=fhir_url,
+            for rt in resource_types:
+                # Skip download if file already exists and verifies.
+                ndjson_path = output_dir / _snake_file_name(rt)
+
+                api = fetch_expected_total(
+                    client=count_client,
+                    resource_type=rt,
+                    max_attempts_per_url=6,
+                    initial_timeout_seconds=120.0,
+                )
+                if api.expected_total is None:
+                    print(
+                        f"[{rt}][ERR] Could not fetch server-reported total count. "
+                        f"method={api.method} (refusing to guess totals; skipping this resource type)",
+                    )
+                    results[rt] = 2
+                    continue
+
+                _write_expected_total_to_state(
                     output_dir=output_dir,
-                    count=int(args.count),
-                    stop_after_this_many=args.stop_after_this_many,
                     resource_type=rt,
+                    expected_total=int(api.expected_total),
                 )
-                print(f"\n[{rt}] Download command: " + " ".join(cmd))
-                return int(_run_one_resource_type(resource_type=rt, cmd=cmd))
+                print(f"[{rt}] Server-reported expected_total={api.expected_total} via {api.method}")
 
-            # If there's an in-progress resumable download state, always resume via
-            # create_ndjson_from_api.py instead of verify-first.
-            #
-            # Why: verify will almost certainly FAIL on incomplete files, and without
-            # destructive re-download enabled we'd otherwise skip the resource type,
-            # preventing resume.
-            resume_in_progress = _resource_has_in_progress_state(output_dir=output_dir, resource_type=rt)
-            if resume_in_progress:
-                print(f"[{rt}] Found in-progress download state; resuming...")
-
-            # Verify first if a file exists and we are NOT resuming.
-            if (not resume_in_progress) and ndjson_path.exists() and ndjson_path.stat().st_size > 0:
-                v_rc, v_fields = _run_verify_one_resource_type(
-                    resource_type=rt,
-                    ndjson_dir=output_dir,
-                    fhir_url=fhir_url,
-                    allow_delta=int(args.verify_allow_delta),
-                )
-                verify_summaries[rt] = v_fields
-                if v_rc == 0 and v_fields.get("status") == "PASS":
-                    print(f"[{rt}] Already verified - skipping download.")
-                    results[rt] = 0
-                    continue
-
-                # Existing file failed verification.
-                # IMPORTANT: do NOT auto-redownload or delete the (possibly mostly-correct)
-                # local download unless the operator explicitly enabled it.
-                if not allow_redownload:
-                    print(
-                        f"[{rt}] Existing NDJSON failed verification. "
-                        "Leaving current file/state intact and moving on to the next resource type. "
-                        "To force a fresh download, re-run with --max-redownload-attempts 1 (or more)."
+                def _download_once() -> int:
+                    cmd = _build_create_ndjson_cmd(
+                        fhir_url=fhir_url,
+                        output_dir=output_dir,
+                        count=int(args.count),
+                        stop_after_this_many=args.stop_after_this_many,
+                        resource_type=rt,
                     )
-                    results[rt] = 2
-                    continue
+                    print(f"\n[{rt}] Download command: " + " ".join(cmd))
+                    return int(_run_one_resource_type(resource_type=rt, cmd=cmd))
 
-            # Download + verify loop.
-            max_attempts = extra_redownload_attempts + 1
-            last_rc = 99
-            last_v_rc = 2
-            last_v_fields: dict[str, str] = {}
-            for attempt in range(1, max_attempts + 1):
-                print(f"[{rt}] Download attempt {attempt}/{max_attempts}...")
-                if attempt > 1:
-                    print(f"[{rt}] Resetting local download state before fresh re-download...")
-                    _reset_resource_download_state(output_dir=output_dir, resource_type=rt)
-                last_rc = _download_once()
-                if last_rc != 0:
-                    print(f"[{rt}][ERR] download subprocess failed rc={last_rc}")
+                # If there's an in-progress resumable download state, always resume via
+                # create_ndjson_from_api.py instead of verify-first.
+                resume_in_progress = _resource_has_in_progress_state(output_dir=output_dir, resource_type=rt)
+                if resume_in_progress:
+                    print(f"[{rt}] Found in-progress download state; resuming...")
 
-                last_v_rc, last_v_fields = _run_verify_one_resource_type(
-                    resource_type=rt,
-                    ndjson_dir=output_dir,
-                    fhir_url=fhir_url,
-                    allow_delta=int(args.verify_allow_delta),
-                )
-                verify_summaries[rt] = last_v_fields
-
-                if last_v_rc == 0 and last_v_fields.get("status") == "PASS":
-                    print(f"[{rt}] Verified PASS.")
-                    results[rt] = 0
-                    break
-
-                # Re-download is needed if verification did not PASS.
-                # (Verifier already encodes the delta threshold via --allow-delta,
-                # so FAIL means delta > allow-delta or integrity errors.)
-                redownload_needed = True
-
-                if attempt >= max_attempts:
-                    results[rt] = 2
-                    break
-
-                if redownload_needed:
-                    print(
-                        f"[{rt}] Verification failed. "
-                        f"Re-downloading is enabled; will try again (remaining attempts: {max_attempts - attempt})."
+                # Verify first if a file exists and we are NOT resuming.
+                if (not resume_in_progress) and ndjson_path.exists() and ndjson_path.stat().st_size > 0:
+                    v_rc, v_fields = _run_verify_one_resource_type(
+                        resource_type=rt,
+                        ndjson_dir=output_dir,
+                        fhir_url=fhir_url,
+                        allow_delta=int(args.verify_allow_delta),
                     )
+                    verify_summaries[rt] = v_fields
+                    if v_rc == 0 and v_fields.get("status") == "PASS":
+                        print(f"[{rt}] Already verified - skipping download.")
+                        results[rt] = 0
+                        continue
+
+                    # Existing file failed verification.
+                    if not allow_redownload:
+                        print(
+                            f"[{rt}] Existing NDJSON failed verification. "
+                            "Leaving current file/state intact and moving on to the next resource type. "
+                            "To force a fresh download, re-run with --max-redownload-attempts 1 (or more)."
+                        )
+                        results[rt] = 2
+                        continue
+
+                # Download + verify loop.
+                max_attempts = extra_redownload_attempts + 1
+                last_rc = 99
+                last_v_rc = 2
+                last_v_fields: dict[str, str] = {}
+                for attempt in range(1, max_attempts + 1):
+                    print(f"[{rt}] Download attempt {attempt}/{max_attempts}...")
+                    if attempt > 1:
+                        print(f"[{rt}] Resetting local download state before fresh re-download...")
+                        _reset_resource_download_state(output_dir=output_dir, resource_type=rt)
+                    last_rc = _download_once()
+                    if last_rc != 0:
+                        print(f"[{rt}][ERR] download subprocess failed rc={last_rc}")
+
+                    last_v_rc, last_v_fields = _run_verify_one_resource_type(
+                        resource_type=rt,
+                        ndjson_dir=output_dir,
+                        fhir_url=fhir_url,
+                        allow_delta=int(args.verify_allow_delta),
+                    )
+                    verify_summaries[rt] = last_v_fields
+
+                    if last_v_rc == 0 and last_v_fields.get("status") == "PASS":
+                        print(f"[{rt}] Verified PASS.")
+                        results[rt] = 0
+                        break
+
+                    # Re-download is needed if verification did not PASS.
+                    redownload_needed = True
+
+                    if attempt >= max_attempts:
+                        results[rt] = 2
+                        break
+
+                    if redownload_needed:
+                        print(
+                            f"[{rt}] Verification failed. "
+                            f"Re-downloading is enabled; will try again (remaining attempts: {max_attempts - attempt})."
+                        )
 
             # end attempt loop
     except KeyboardInterrupt:
