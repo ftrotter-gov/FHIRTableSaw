@@ -12,7 +12,8 @@ This document contains rules and guidelines for AI agents working on the FHIRTab
 * Always use snake_case without spaces, for column names on the relational model tables.
 * Do not attempt to write scripts that handle compressed files.
 * If I ask that you work on a specific type of file. Assume that the script should be working on only that type of file (usually ndjson files)
-
+* For all command line scripts which are calling other command line scripts (curl, etc). Please print the command line file that is being generated and display its output.
+* For long running programs, please print some kind of update to the screen so that progress can be followed.
 
 ## Go compiling rules
 
