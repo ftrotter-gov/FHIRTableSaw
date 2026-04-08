@@ -32,6 +32,8 @@ from importers import (
     EndpointImporter,
     LocationImporter,
 )
+from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable, AuthError
 
 
 # Map resource types to their importers
@@ -163,6 +165,63 @@ def load_neo4j_config() -> Dict[str, str]:
     return config
 
 
+def check_neo4j_connection(*, config: Dict[str, str]) -> bool:
+    """
+    Check if Neo4j server is running and accessible.
+    
+    Args:
+        config: Neo4j connection configuration
+    
+    Returns:
+        True if connection successful, exits program otherwise
+    """
+    print(f"Checking Neo4j connection at {config['uri']}...")
+    
+    try:
+        driver = GraphDatabase.driver(config['uri'], auth=(config['user'], config['password']))
+        
+        # Try to verify connectivity
+        with driver.session() as session:
+            result = session.run("RETURN 1 AS test")
+            result.single()
+        
+        driver.close()
+        print("✓ Neo4j connection successful!\n")
+        return True
+        
+    except ServiceUnavailable as e:
+        print(f"\n{'='*60}")
+        print("ERROR: Cannot connect to Neo4j server!")
+        print(f"{'='*60}")
+        print(f"\nNeo4j server at {config['uri']} is not available.")
+        print("\nPossible solutions:")
+        print("  1. Start Neo4j: cd analysis_neo4j && docker-compose up -d")
+        print("  2. Check if Neo4j is running: docker-compose ps")
+        print("  3. Check Neo4j logs: docker-compose logs neo4j")
+        print(f"\nError details: {e}\n")
+        sys.exit(1)
+        
+    except AuthError as e:
+        print(f"\n{'='*60}")
+        print("ERROR: Authentication failed!")
+        print(f"{'='*60}")
+        print(f"\nIncorrect username or password for Neo4j at {config['uri']}.")
+        print("\nPossible solutions:")
+        print("  1. Check your .env file has the correct password")
+        print("  2. Verify NEO4J_PASSWORD environment variable")
+        print("  3. Reset Neo4j password if needed")
+        print(f"\nError details: {e}\n")
+        sys.exit(1)
+        
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print("ERROR: Unexpected error connecting to Neo4j!")
+        print(f"{'='*60}")
+        print(f"\nError: {e}")
+        print(f"\nPlease check your Neo4j configuration at {config['uri']}\n")
+        sys.exit(1)
+
+
 def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag: Optional[str] = None, limit: Optional[int] = None) -> None:
     """
     Import all discovered NDJSON files into Neo4j.
@@ -180,7 +239,9 @@ def import_resource_files(*, files: Dict[str, Path], batch_size: int, import_tag
     # Load Neo4j configuration
     config = load_neo4j_config()
     
-    print(f"\nConnecting to Neo4j at {config['uri']}...")
+    # Check Neo4j connection before proceeding
+    check_neo4j_connection(config=config)
+    
     print(f"Importing {len(files)} resource types with batch size {batch_size}\n")
     
     # Import order matters for relationship creation
