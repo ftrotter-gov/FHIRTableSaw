@@ -341,13 +341,14 @@ class PractitionerImporter(BaseImporter):
         return endpoint_refs
     
     @staticmethod
-    def _create_endpoint_relationships(*, session: Session, practitioner_data: List[Dict[str, Any]]) -> None:
+    def _create_endpoint_relationships(*, session: Session, practitioner_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between Practitioner and Endpoints with rank property.
         
         Args:
             session: Neo4j session
             practitioner_data: List of processed practitioner data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
         # Prepare data for relationship creation
         relationship_data = []
@@ -367,13 +368,22 @@ class PractitionerImporter(BaseImporter):
         if not relationship_data:
             return
         
-        # Create relationships with rank property
-        query = """
-        UNWIND $batch AS rel
-        MATCH (p:Practitioner {fhir_id: rel.practitioner_id})
-        MATCH (e:Endpoint {fhir_id: rel.endpoint_id})
-        MERGE (p)-[r:HAS_ENDPOINT]->(e)
-        SET r.rank = rel.rank
-        """
+        # Choose operation based on mode
+        if use_create:
+            query = """
+            UNWIND $batch AS rel
+            MATCH (p:Practitioner {fhir_id: rel.practitioner_id})
+            MATCH (e:Endpoint {fhir_id: rel.endpoint_id})
+            CREATE (p)-[r:HAS_ENDPOINT]->(e)
+            SET r.rank = rel.rank
+            """
+        else:
+            query = """
+            UNWIND $batch AS rel
+            MATCH (p:Practitioner {fhir_id: rel.practitioner_id})
+            MATCH (e:Endpoint {fhir_id: rel.endpoint_id})
+            MERGE (p)-[r:HAS_ENDPOINT]->(e)
+            SET r.rank = rel.rank
+            """
         
         session.run(query, batch=relationship_data)

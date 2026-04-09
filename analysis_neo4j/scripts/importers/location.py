@@ -170,43 +170,47 @@ class LocationImporter(BaseImporter):
         node_count = record['count'] if record else 0
         
         # Create relationships
-        self._create_relationships(session=session, location_data=location_data)
+        self._create_relationships(session=session, location_data=location_data, use_create=self.use_create)
         
         return node_count
     
     @staticmethod
-    def _create_relationships(*, session: Session, location_data: List[Dict[str, Any]]) -> None:
+    def _create_relationships(*, session: Session, location_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between Location and other resources.
         
         Args:
             session: Neo4j session
             location_data: List of processed location data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
+        # Choose operation based on mode
+        rel_op = "CREATE" if use_create else "MERGE"
+        
         # Create managing organization relationships
-        org_query = """
+        org_query = f"""
         UNWIND $batch AS loc
-        MATCH (l:Location {fhir_id: loc.fhir_id})
-        MATCH (o:Organization {fhir_id: loc.managing_organization_id})
-        MERGE (o)-[:MANAGES]->(l)
+        MATCH (l:Location {{fhir_id: loc.fhir_id}})
+        MATCH (o:Organization {{fhir_id: loc.managing_organization_id}})
+        {rel_op} (o)-[:MANAGES]->(l)
         """
         session.run(org_query, batch=[l for l in location_data if l.get('managing_organization_id')])
         
         # Create parent location relationships
-        parent_query = """
+        parent_query = f"""
         UNWIND $batch AS loc
-        MATCH (child:Location {fhir_id: loc.fhir_id})
-        MATCH (parent:Location {fhir_id: loc.part_of_id})
-        MERGE (child)-[:PART_OF]->(parent)
+        MATCH (child:Location {{fhir_id: loc.fhir_id}})
+        MATCH (parent:Location {{fhir_id: loc.part_of_id}})
+        {rel_op} (child)-[:PART_OF]->(parent)
         """
         session.run(parent_query, batch=[l for l in location_data if l.get('part_of_id')])
         
         # Create Endpoint relationships
-        ep_query = """
+        ep_query = f"""
         UNWIND $batch AS loc
-        MATCH (l:Location {fhir_id: loc.fhir_id})
+        MATCH (l:Location {{fhir_id: loc.fhir_id}})
         UNWIND loc.endpoint_ids AS ep_id
-        MATCH (e:Endpoint {fhir_id: ep_id})
-        MERGE (l)-[:HAS_ENDPOINT]->(e)
+        MATCH (e:Endpoint {{fhir_id: ep_id}})
+        {rel_op} (l)-[:HAS_ENDPOINT]->(e)
         """
         session.run(ep_query, batch=[l for l in location_data if l.get('endpoint_ids')])

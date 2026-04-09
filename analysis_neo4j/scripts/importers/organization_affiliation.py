@@ -146,53 +146,95 @@ class OrganizationAffiliationImporter(BaseImporter):
         node_count = record['count'] if record else 0
         
         # Create relationships
-        self._create_relationships(session=session, affiliation_data=affiliation_data)
+        self._create_relationships(session=session, affiliation_data=affiliation_data, use_create=self.use_create)
         
         return node_count
     
     @staticmethod
-    def _create_relationships(*, session: Session, affiliation_data: List[Dict[str, Any]]) -> None:
+    def _create_relationships(*, session: Session, affiliation_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between OrganizationAffiliation and other resources.
         
         Args:
             session: Neo4j session
             affiliation_data: List of processed affiliation data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
-        # Create primary organization relationships
-        org_query = """
-        UNWIND $batch AS aff
-        MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-        MATCH (o:Organization {fhir_id: aff.organization_id})
-        MERGE (o)-[:HAS_AFFILIATION]->(oa)
-        """
-        session.run(org_query, batch=[a for a in affiliation_data if a.get('organization_id')])
-        
-        # Create participating organization relationships
-        part_org_query = """
-        UNWIND $batch AS aff
-        MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-        MATCH (o:Organization {fhir_id: aff.participating_organization_id})
-        MERGE (oa)-[:AFFILIATED_WITH]->(o)
-        """
-        session.run(part_org_query, batch=[a for a in affiliation_data if a.get('participating_organization_id')])
-        
-        # Create Location relationships
-        loc_query = """
-        UNWIND $batch AS aff
-        MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-        UNWIND aff.location_ids AS loc_id
-        MATCH (l:Location {fhir_id: loc_id})
-        MERGE (oa)-[:AT_LOCATION]->(l)
-        """
-        session.run(loc_query, batch=[a for a in affiliation_data if a.get('location_ids')])
-        
-        # Create Endpoint relationships
-        ep_query = """
-        UNWIND $batch AS aff
-        MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
-        UNWIND aff.endpoint_ids AS ep_id
-        MATCH (e:Endpoint {fhir_id: ep_id})
-        MERGE (oa)-[:HAS_ENDPOINT]->(e)
-        """
-        session.run(ep_query, batch=[a for a in affiliation_data if a.get('endpoint_ids')])
+        if use_create:
+            # FAST MODE: Single combined query to minimize round trips (4x faster!)
+            combined_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            
+            // Primary organization relationship
+            OPTIONAL MATCH (o:Organization {fhir_id: aff.organization_id})
+            WHERE aff.organization_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN o IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (o)-[:HAS_AFFILIATION]->(oa)
+            )
+            
+            // Participating organization relationship
+            WITH oa, aff
+            OPTIONAL MATCH (po:Organization {fhir_id: aff.participating_organization_id})
+            WHERE aff.participating_organization_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN po IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:AFFILIATED_WITH]->(po)
+            )
+            
+            // Location relationships (multiple)
+            WITH oa, aff
+            UNWIND COALESCE(aff.location_ids, []) AS loc_id
+            OPTIONAL MATCH (l:Location {fhir_id: loc_id})
+            FOREACH (_ IN CASE WHEN l IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:AT_LOCATION]->(l)
+            )
+            
+            // Endpoint relationships (multiple)
+            WITH DISTINCT oa, aff
+            UNWIND COALESCE(aff.endpoint_ids, []) AS ep_id
+            OPTIONAL MATCH (e:Endpoint {fhir_id: ep_id})
+            FOREACH (_ IN CASE WHEN e IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (oa)-[:HAS_ENDPOINT]->(e)
+            )
+            """
+            session.run(combined_query, batch=affiliation_data)
+            
+        else:
+            # SAFE MODE: Separate queries using MERGE (slower but clearer)
+            # Create primary organization relationships
+            org_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (o:Organization {fhir_id: aff.organization_id})
+            MERGE (o)-[:HAS_AFFILIATION]->(oa)
+            """
+            session.run(org_query, batch=[a for a in affiliation_data if a.get('organization_id')])
+            
+            # Create participating organization relationships
+            part_org_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            MATCH (o:Organization {fhir_id: aff.participating_organization_id})
+            MERGE (oa)-[:AFFILIATED_WITH]->(o)
+            """
+            session.run(part_org_query, batch=[a for a in affiliation_data if a.get('participating_organization_id')])
+            
+            # Create Location relationships
+            loc_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            UNWIND aff.location_ids AS loc_id
+            MATCH (l:Location {fhir_id: loc_id})
+            MERGE (oa)-[:AT_LOCATION]->(l)
+            """
+            session.run(loc_query, batch=[a for a in affiliation_data if a.get('location_ids')])
+            
+            # Create Endpoint relationships
+            ep_query = """
+            UNWIND $batch AS aff
+            MATCH (oa:OrganizationAffiliation {fhir_id: aff.fhir_id})
+            UNWIND aff.endpoint_ids AS ep_id
+            MATCH (e:Endpoint {fhir_id: ep_id})
+            MERGE (oa)-[:HAS_ENDPOINT]->(e)
+            """
+            session.run(ep_query, batch=[a for a in affiliation_data if a.get('endpoint_ids')])

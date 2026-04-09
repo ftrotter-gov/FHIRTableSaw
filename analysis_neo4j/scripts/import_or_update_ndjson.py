@@ -83,53 +83,51 @@ def discover_ndjson_files(*, directory: Path) -> Dict[str, Path]:
         print(f"Error: Path is not a directory: {directory}")
         return discovered
     
-    # Confusing patterns that should error
+    # Confusing patterns that should error (case-insensitive)
     confusing_patterns = {
-        'Practitioner.Role': 'PractitionerRole',
-        'Organization.Affiliation': 'OrganizationAffiliation',
+        'practitioner.role': 'PractitionerRole',
+        'organization.affiliation': 'OrganizationAffiliation',
     }
     
-    # Check for confusing patterns first
-    for pattern, correct_name in confusing_patterns.items():
-        pattern_files = list(directory.glob(f"{pattern}.*.ndjson"))
-        if pattern_files:
-            for bad_file in pattern_files:
+    # Check for confusing patterns first (case-insensitive)
+    all_files = list(directory.glob("*.ndjson"))
+    for filepath in all_files:
+        filename_lower = filepath.name.lower()
+        for pattern_lower, correct_name in confusing_patterns.items():
+            if filename_lower.startswith(f"{pattern_lower}."):
                 print(f"\n{'!'*60}")
                 print(f"ERROR: Confusing filename detected!")
-                print(f"File: {bad_file.name}")
+                print(f"File: {filepath.name}")
                 print(f"This pattern is ambiguous. Please rename to:")
                 print(f"  {correct_name}.*.ndjson")
-                print(f"Example: {correct_name}.{bad_file.stem.split('.', 2)[-1]}.ndjson")
+                parts = filepath.stem.split('.', 2)
+                if len(parts) > 2:
+                    print(f"Example: {correct_name}.{parts[-1]}.ndjson")
+                else:
+                    print(f"Example: {correct_name}.ndjson")
                 print(f"{'!'*60}\n")
-            sys.exit(1)
+                sys.exit(1)
     
-    # Look for files matching supported resource types with wildcards
+    # Look for files matching supported resource types with wildcards (case-insensitive)
     for resource_type in IMPORTER_MAP.keys():
-        # Use glob to find all files matching ResourceType.*.ndjson
-        pattern = f"{resource_type}.*.ndjson"
-        matching_files = list(directory.glob(pattern))
-        
-        # Also check for exact match: ResourceType.ndjson
-        exact_match = directory / f"{resource_type}.ndjson"
-        if exact_match.exists() and exact_match.is_file():
-            matching_files.insert(0, exact_match)
-        
-        # Filter out false matches
-        # For example, Organization.* should NOT match OrganizationAffiliation.*
         valid_files = []
-        for filepath in matching_files:
+        
+        # Get all .ndjson files in the directory
+        all_ndjson_files = list(directory.glob("*.ndjson"))
+        
+        for filepath in all_ndjson_files:
             filename = filepath.name
+            filename_lower = filename.lower()
+            resource_type_lower = resource_type.lower()
             
-            # Check if this file actually starts with the exact resource type followed by . or end
-            if filename.startswith(f"{resource_type}."):
+            # Check if filename starts with resource type (case-insensitive)
+            if filename_lower.startswith(f"{resource_type_lower}."):
                 # Make sure it's not a longer resource type
-                # e.g., Organization.Something should match, but not OrganizationAffiliation.Something
-                after_type = filename[len(resource_type):]
+                # e.g., organization.* should match, but not organizationaffiliation.*
+                after_type = filename_lower[len(resource_type_lower):]
                 
                 # Valid if it's .ndjson or .*.ndjson
                 if after_type == '.ndjson' or (after_type.startswith('.') and after_type.endswith('.ndjson')):
-                    # Additional check: ensure we're not matching a longer resource type
-                    # by checking that the next char after resource_type is indeed a '.'
                     valid_files.append(filepath)
         
         # If we found multiple files for the same resource type, take the first one

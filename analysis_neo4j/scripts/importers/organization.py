@@ -141,34 +141,38 @@ class OrganizationImporter(BaseImporter):
         node_count = record['count'] if record else 0
         
         # Create relationships
-        self._create_relationships(session=session, org_data=org_data)
+        self._create_relationships(session=session, org_data=org_data, use_create=self.use_create)
         
         return node_count
     
     @staticmethod
-    def _create_relationships(*, session: Session, org_data: List[Dict[str, Any]]) -> None:
+    def _create_relationships(*, session: Session, org_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between Organization and other resources.
         
         Args:
             session: Neo4j session
             org_data: List of processed organization data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
+        # Choose operation based on mode
+        rel_op = "CREATE" if use_create else "MERGE"
+        
         # Create parent organization relationships
-        parent_query = """
+        parent_query = f"""
         UNWIND $batch AS org
-        MATCH (child:Organization {fhir_id: org.fhir_id})
-        MATCH (parent:Organization {fhir_id: org.part_of_id})
-        MERGE (child)-[:PART_OF]->(parent)
+        MATCH (child:Organization {{fhir_id: org.fhir_id}})
+        MATCH (parent:Organization {{fhir_id: org.part_of_id}})
+        {rel_op} (child)-[:PART_OF]->(parent)
         """
         session.run(parent_query, batch=[o for o in org_data if o.get('part_of_id')])
         
         # Create Endpoint relationships
-        ep_query = """
+        ep_query = f"""
         UNWIND $batch AS org
-        MATCH (o:Organization {fhir_id: org.fhir_id})
+        MATCH (o:Organization {{fhir_id: org.fhir_id}})
         UNWIND org.endpoint_ids AS ep_id
-        MATCH (e:Endpoint {fhir_id: ep_id})
-        MERGE (o)-[:HAS_ENDPOINT]->(e)
+        MATCH (e:Endpoint {{fhir_id: ep_id}})
+        {rel_op} (o)-[:HAS_ENDPOINT]->(e)
         """
         session.run(ep_query, batch=[o for o in org_data if o.get('endpoint_ids')])

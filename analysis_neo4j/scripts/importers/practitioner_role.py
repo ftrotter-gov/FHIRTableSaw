@@ -146,53 +146,95 @@ class PractitionerRoleImporter(BaseImporter):
         node_count = record['count'] if record else 0
         
         # Create relationships
-        self._create_relationships(session=session, role_data=role_data)
+        self._create_relationships(session=session, role_data=role_data, use_create=self.use_create)
         
         return node_count
     
     @staticmethod
-    def _create_relationships(*, session: Session, role_data: List[Dict[str, Any]]) -> None:
+    def _create_relationships(*, session: Session, role_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between PractitionerRole and other resources.
         
         Args:
             session: Neo4j session
             role_data: List of processed role data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
-        # Create Practitioner relationships
-        prac_query = """
-        UNWIND $batch AS role
-        MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
-        MATCH (p:Practitioner {fhir_id: role.practitioner_id})
-        MERGE (p)-[:HAS_ROLE]->(pr)
-        """
-        session.run(prac_query, batch=[r for r in role_data if r.get('practitioner_id')])
-        
-        # Create Organization relationships
-        org_query = """
-        UNWIND $batch AS role
-        MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
-        MATCH (o:Organization {fhir_id: role.organization_id})
-        MERGE (pr)-[:WORKS_AT]->(o)
-        """
-        session.run(org_query, batch=[r for r in role_data if r.get('organization_id')])
-        
-        # Create Location relationships
-        loc_query = """
-        UNWIND $batch AS role
-        MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
-        UNWIND role.location_ids AS loc_id
-        MATCH (l:Location {fhir_id: loc_id})
-        MERGE (pr)-[:AT_LOCATION]->(l)
-        """
-        session.run(loc_query, batch=[r for r in role_data if r.get('location_ids')])
-        
-        # Create Endpoint relationships
-        ep_query = """
-        UNWIND $batch AS role
-        MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
-        UNWIND role.endpoint_ids AS ep_id
-        MATCH (e:Endpoint {fhir_id: ep_id})
-        MERGE (pr)-[:HAS_ENDPOINT]->(e)
-        """
-        session.run(ep_query, batch=[r for r in role_data if r.get('endpoint_ids')])
+        if use_create:
+            # FAST MODE: Single combined query to minimize round trips (4x faster!)
+            combined_query = """
+            UNWIND $batch AS role
+            MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
+            
+            // Practitioner relationship
+            OPTIONAL MATCH (p:Practitioner {fhir_id: role.practitioner_id})
+            WHERE role.practitioner_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN p IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (p)-[:HAS_ROLE]->(pr)
+            )
+            
+            // Organization relationship
+            WITH pr, role
+            OPTIONAL MATCH (o:Organization {fhir_id: role.organization_id})
+            WHERE role.organization_id IS NOT NULL
+            FOREACH (_ IN CASE WHEN o IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (pr)-[:WORKS_AT]->(o)
+            )
+            
+            // Location relationships (multiple)
+            WITH pr, role
+            UNWIND COALESCE(role.location_ids, []) AS loc_id
+            OPTIONAL MATCH (l:Location {fhir_id: loc_id})
+            FOREACH (_ IN CASE WHEN l IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (pr)-[:AT_LOCATION]->(l)
+            )
+            
+            // Endpoint relationships (multiple)
+            WITH DISTINCT pr, role
+            UNWIND COALESCE(role.endpoint_ids, []) AS ep_id
+            OPTIONAL MATCH (e:Endpoint {fhir_id: ep_id})
+            FOREACH (_ IN CASE WHEN e IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (pr)-[:HAS_ENDPOINT]->(e)
+            )
+            """
+            session.run(combined_query, batch=role_data)
+            
+        else:
+            # SAFE MODE: Separate queries using MERGE (slower but clearer)
+            # Create Practitioner relationships
+            prac_query = """
+            UNWIND $batch AS role
+            MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
+            MATCH (p:Practitioner {fhir_id: role.practitioner_id})
+            MERGE (p)-[:HAS_ROLE]->(pr)
+            """
+            session.run(prac_query, batch=[r for r in role_data if r.get('practitioner_id')])
+            
+            # Create Organization relationships
+            org_query = """
+            UNWIND $batch AS role
+            MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
+            MATCH (o:Organization {fhir_id: role.organization_id})
+            MERGE (pr)-[:WORKS_AT]->(o)
+            """
+            session.run(org_query, batch=[r for r in role_data if r.get('organization_id')])
+            
+            # Create Location relationships
+            loc_query = """
+            UNWIND $batch AS role
+            MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
+            UNWIND role.location_ids AS loc_id
+            MATCH (l:Location {fhir_id: loc_id})
+            MERGE (pr)-[:AT_LOCATION]->(l)
+            """
+            session.run(loc_query, batch=[r for r in role_data if r.get('location_ids')])
+            
+            # Create Endpoint relationships
+            ep_query = """
+            UNWIND $batch AS role
+            MATCH (pr:PractitionerRole {fhir_id: role.fhir_id})
+            UNWIND role.endpoint_ids AS ep_id
+            MATCH (e:Endpoint {fhir_id: ep_id})
+            MERGE (pr)-[:HAS_ENDPOINT]->(e)
+            """
+            session.run(ep_query, batch=[r for r in role_data if r.get('endpoint_ids')])

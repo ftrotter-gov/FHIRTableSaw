@@ -107,7 +107,7 @@ class EndpointImporter(BaseImporter):
         node_count = record['count'] if record else 0
         
         # Create relationships
-        self._create_relationships(session=session, endpoint_data=endpoint_data)
+        self._create_relationships(session=session, endpoint_data=endpoint_data, use_create=self.use_create)
         
         return node_count
     
@@ -139,19 +139,23 @@ class EndpointImporter(BaseImporter):
         return None
     
     @staticmethod
-    def _create_relationships(*, session: Session, endpoint_data: List[Dict[str, Any]]) -> None:
+    def _create_relationships(*, session: Session, endpoint_data: List[Dict[str, Any]], use_create: bool = False) -> None:
         """
         Create relationships between Endpoint and other resources.
         
         Args:
             session: Neo4j session
             endpoint_data: List of processed endpoint data
+            use_create: If True, use CREATE instead of MERGE (faster but not idempotent)
         """
+        # Choose operation based on mode
+        rel_op = "CREATE" if use_create else "MERGE"
+        
         # Create managing organization relationships
-        org_query = """
+        org_query = f"""
         UNWIND $batch AS ep
-        MATCH (e:Endpoint {fhir_id: ep.fhir_id})
-        MATCH (o:Organization {fhir_id: ep.managing_organization_id})
-        MERGE (o)-[:MANAGES]->(e)
+        MATCH (e:Endpoint {{fhir_id: ep.fhir_id}})
+        MATCH (o:Organization {{fhir_id: ep.managing_organization_id}})
+        {rel_op} (o)-[:MANAGES]->(e)
         """
         session.run(org_query, batch=[e for e in endpoint_data if e.get('managing_organization_id')])
