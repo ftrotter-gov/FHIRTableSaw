@@ -481,9 +481,21 @@ class BulkImportLoader:
             print("=" * 80)
         
         if failed > 0:
-            print("\n⚠️  Some resources failed to import. Check the logs above for details.")
+            print()
+            print("=" * 80)
+            print("❌❌❌ IMPORT FAILED ❌❌❌")
+            print("=" * 80)
+            print(f"⚠️  {failed} resource type(s) failed to import.")
+            print("⚠️  Check the error messages above for details.")
+            print("⚠️  The import process was NOT successful.")
+            print("=" * 80)
         else:
-            print("\n✅ All resources imported successfully!")
+            print()
+            print("=" * 80)
+            print("✅✅✅ IMPORT SUCCESSFUL ✅✅✅")
+            print("=" * 80)
+            print("✅ All resources imported successfully!")
+            print("=" * 80)
         
         return results
 
