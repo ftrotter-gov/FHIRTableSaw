@@ -411,7 +411,7 @@ class BulkImportLoader:
                     cli_path,
                     "bulk-import",
                     "-v", fhir_version,
-                    "--port", str(port),
+                    "--port", str(actual_port),
                     "--source-directory", str(temp_dir),
                     "--target-base", target_url
                 ]
@@ -425,7 +425,7 @@ class BulkImportLoader:
                     cli_path=cli_path,
                     temp_dir=temp_dir,
                     target_url=target_url,
-                    port=port,
+                    port=actual_port,
                     fhir_version=fhir_version,
                     batch_size=batch_size,
                     verbose=verbose
