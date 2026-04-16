@@ -151,10 +151,11 @@ echo ""
 
 # Run in background with nohup
 # Don't use a CMD variable - pass arguments directly to avoid quote issues
+# Use tee to send output to both terminal and log file
 nohup "$PYTHON_CMD" hload/hapi_manager.py bulk-import "$SOURCE_DIR" \
     --name "$INSTANCE_NAME" \
     --batch-size "$BATCH_SIZE" \
-    --verbose > "$LOG_FILE" 2>&1 &
+    --verbose 2>&1 | tee "$LOG_FILE" &
 IMPORT_PID=$!
 
 # Save PID
