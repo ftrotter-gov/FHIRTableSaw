@@ -52,6 +52,36 @@ if ! docker ps &> /dev/null; then
     exit 1
 fi
 
+# Check if hapi-fhir-cli is installed
+if ! command -v hapi-fhir-cli &> /dev/null; then
+    echo -e "${RED}❌ Error: hapi-fhir-cli is not installed or not in PATH${NC}"
+    echo ""
+    echo "   The bulk import process requires hapi-fhir-cli to be installed."
+    echo ""
+    echo "   Installation instructions:"
+    echo "   1. Download from: https://github.com/hapifhir/hapi-fhir/releases"
+    echo "   2. Look for 'hapi-fhir-cli' in the latest release"
+    echo "   3. Download the JAR file"
+    echo "   4. Create a wrapper script named 'hapi-fhir-cli' in your PATH:"
+    echo ""
+    echo "      #!/bin/bash"
+    echo "      java -jar /path/to/hapi-fhir-cli.jar \"\$@\""
+    echo ""
+    echo "   5. Make it executable: chmod +x /path/to/hapi-fhir-cli"
+    echo ""
+    exit 1
+fi
+
+# Verify hapi-fhir-cli actually works
+if ! hapi-fhir-cli help &> /dev/null; then
+    echo -e "${RED}❌ Error: hapi-fhir-cli found but not working${NC}"
+    echo "   Command 'hapi-fhir-cli help' failed"
+    echo "   Verify Java is installed and hapi-fhir-cli is properly configured"
+    exit 1
+fi
+
+echo -e "${GREEN}✓${NC} hapi-fhir-cli is installed and working"
+
 # Create log directory
 mkdir -p "$LOG_DIR"
 echo -e "${GREEN}✓${NC} Log directory: $LOG_DIR"
