@@ -11,6 +11,7 @@ Uses util/ndjson_discovery.py to discover files following naming conventions.
 import argparse
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -80,6 +81,41 @@ class BulkImportLoader:
         "OrganizationAffiliation",
         "PractitionerRole",
     ]
+    
+    @staticmethod
+    def _find_available_port(*, start_port: int = 9090, max_attempts: int = 100) -> int:
+        """
+        Find an available port starting from start_port.
+        
+        The hapi-fhir-cli bulk-import command starts its own temporary server,
+        so we need to find an available port for it to use.
+        
+        Args:
+            start_port: Port to start searching from
+            max_attempts: Maximum number of ports to try
+            
+        Returns:
+            Available port number
+            
+        Raises:
+            RuntimeError: If no available port found within max_attempts
+        """
+        for port_offset in range(max_attempts):
+            port = start_port + port_offset
+            try:
+                # Try to bind to the port
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.bind(('0.0.0.0', port))
+                    return port
+            except OSError:
+                # Port is in use, try next one
+                continue
+        
+        raise RuntimeError(
+            f"bulk_import_loader.py Error: Could not find available port in range "
+            f"{start_port}-{start_port + max_attempts - 1}"
+        )
     
     @staticmethod
     def validate_cli_available(*, cli_path: str) -> bool:
@@ -289,13 +325,23 @@ class BulkImportLoader:
                 f"bulk_import_loader.py Error: hapi-fhir-cli not found or not executable: {cli_path}"
             )
         
+        # Find an available port for the CLI's temporary server
+        # (The CLI starts its own server, separate from the target HAPI server)
+        try:
+            actual_port = BulkImportLoader._find_available_port(start_port=port)
+            if actual_port != port:
+                print(f"⚠️  Note: Requested CLI port {port} is in use, using port {actual_port} instead")
+                print()
+        except RuntimeError as error:
+            raise RuntimeError(str(error))
+        
         print("=" * 80)
         print("HAPI FHIR Bulk Import Loader")
         print("=" * 80)
         print(f"Source Directory:  {source_dir}")
         print(f"Target Server:     {target_url}")
         print(f"CLI Path:          {cli_path}")
-        print(f"CLI Port:          {port}")
+        print(f"CLI Port:          {actual_port}")
         print(f"FHIR Version:      {fhir_version}")
         if batch_size is not None:
             print(f"Batch Size:        {batch_size}")
