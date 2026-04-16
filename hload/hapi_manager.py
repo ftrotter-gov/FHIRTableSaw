@@ -164,7 +164,7 @@ class HapiManager:
     """Main HAPI FHIR container management class"""
     
     @staticmethod
-    def run_docker(*, name: str, port: int, data_dir: str) -> None:
+    def run_docker(*, name: str, port: int, data_dir: str, ig_package: str = None) -> None:
         """
         Start or create HAPI FHIR container.
         
@@ -172,7 +172,29 @@ class HapiManager:
             name: Container name
             port: Port to expose
             data_dir: Data directory path
+            ig_package: Path to NDH IG package file (optional validation)
         """
+        # Validate NDH IG package exists (required for system to function)
+        if ig_package:
+            ig_path = Path(ig_package)
+            if not ig_path.exists():
+                print()
+                print("=" * 80)
+                print("❌ ERROR: NDH Implementation Guide package not found")
+                print("=" * 80)
+                print(f"Expected location: {ig_path.absolute()}")
+                print()
+                print("The system requires the NDH IG package to function correctly.")
+                print("Please either:")
+                print("  1. Place ndh_package.tgz in the hload/ directory, or")
+                print("  2. Specify the path using --ig-package /path/to/your/package.tgz")
+                print()
+                print("Download the NDH IG package from:")
+                print("  https://build.fhir.org/ig/HL7/fhir-us-ndh/")
+                print("=" * 80)
+                sys.exit(1)
+            print(f"✓ NDH IG package found: {ig_path.absolute()}")
+        
         # Check for port conflicts with other tracked instances
         if HapiInstanceRegistry.check_port_conflict(port=port, exclude_name=name):
             conflicting_instances = [
@@ -568,6 +590,11 @@ Examples:
         required=True,
         help='Data directory path (can be relative or absolute)'
     )
+    run_parser.add_argument(
+        '--ig-package',
+        default=str(Path(__file__).parent / 'ndh_package.tgz'),
+        help='Path to NDH IG package file (default: hload/ndh_package.tgz)'
+    )
     
     # delete subcommand
     del_parser = subparsers.add_parser(
@@ -690,7 +717,8 @@ Examples:
             HapiManager.run_docker(
                 name=args.name,
                 port=args.port,
-                data_dir=args.data_dir
+                data_dir=args.data_dir,
+                ig_package=args.ig_package
             )
         elif args.command == 'delete':
             HapiManager.delete_docker(
