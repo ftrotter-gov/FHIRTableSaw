@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"name": "FHIRTableSaw",
+			"path": "../.."
+		},
+		{
+			"name": "initial",
+			"path": "../../../../../../../Volumes/eBolt/palantir/ndjson/initial"
+		}
+	],
+	"settings": {
+		"python.languageServer": "Pylance",
+		"files.associations": {
+			"*.yaml": "yaml",
+			"*.yml": "yaml"
+		}
+	}
+}

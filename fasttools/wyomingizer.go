@@ -364,7 +364,10 @@ func findShardFiles(dir, prefix string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	pfx := strings.ToLower(prefix)
+	// Convert PascalCase to snake_case for matching
+	// e.g., "Organization" -> "organization", "OrganizationAffiliation" -> "organization_affiliation"
+	pfx := toSnakeCase(prefix)
+	
 	var out []string
 	for _, e := range entries {
 		if e.IsDir() {
@@ -375,13 +378,29 @@ func findShardFiles(dir, prefix string) ([]string, error) {
 		if !strings.HasSuffix(lower, ".ndjson") {
 			continue
 		}
-		if !strings.HasPrefix(lower, pfx) {
-			continue
+		// Match exact prefix.ndjson or prefix.{number}.ndjson for sharding
+		if strings.HasPrefix(lower, pfx) {
+			afterPrefix := lower[len(pfx):]
+			if afterPrefix == ".ndjson" || (len(afterPrefix) > 1 && afterPrefix[0] == '.' && afterPrefix[1] >= '0' && afterPrefix[1] <= '9') {
+				out = append(out, filepath.Join(dir, e.Name()))
+			}
 		}
-		out = append(out, filepath.Join(dir, e.Name()))
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// toSnakeCase converts PascalCase to snake_case
+// e.g., "OrganizationAffiliation" -> "organization_affiliation"
+func toSnakeCase(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteByte('_')
+		}
+		result.WriteRune(r)
+	}
+	return strings.ToLower(result.String())
 }
 
 func scanFileLines(path string, fn func(line []byte) error) (invalidJSON uint64, err error) {
@@ -709,7 +728,14 @@ func newWriters(outDir, statesKey string, overwrite bool) (*writers, error) {
 		return nil, err
 	}
 
-	return &writers{locations: loc, organizations: org, practitioners: pract, organizationAffiliations: aff, practitionerRoles: role, endpoints: ep}, nil
+	return &writers{
+		locations:                loc,
+		organizations:            org,
+		practitioners:            pract,
+		organizationAffiliations: aff,
+		practitionerRoles:        role,
+		endpoints:                ep,
+	}, nil
 }
 
 func (w *writers) Flush() error {
