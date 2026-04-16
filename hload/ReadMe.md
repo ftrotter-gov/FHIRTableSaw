@@ -29,6 +29,58 @@ python hload/hapi_manager.py delete --name my-hapi
 python hload/hapi_manager.py delete --name my-hapi --remove-data
 ```
 
+## Background Import (for SSH sessions)
+
+For long-running imports on remote servers, use the background import scripts that allow you to disconnect SSH without stopping the import:
+
+```bash
+# Start import in background with logging
+./hload/run_background_import.sh
+
+# Check progress anytime
+./hload/check_import_progress.sh
+
+# Watch the log in real-time
+tail -f /data/hapi/logs/import_latest.log
+```
+
+**Features:**
+- ✅ Runs in background with `nohup` (survives SSH disconnect)
+- ✅ Auto-detects single HAPI instance from `.env`
+- ✅ Batch size of 10,000 resources by default
+- ✅ Timestamped log files in `/data/hapi/logs/`
+- ✅ Process ID tracking for monitoring
+- ✅ Prevents multiple simultaneous imports
+
+**Configuration:**
+
+Set environment variables to customize behavior:
+
+```bash
+# Custom source directory (default: /data/ndjson)
+SOURCE_DIR=/path/to/my/ndjson ./hload/run_background_import.sh
+
+# Custom log directory (default: /data/hapi/logs)
+LOG_DIR=/var/log/hapi ./hload/run_background_import.sh
+
+# Custom batch size (default: 10000)
+BATCH_SIZE=5000 ./hload/run_background_import.sh
+
+# Combine multiple settings
+SOURCE_DIR=/data/ndjson LOG_DIR=/var/log/hapi BATCH_SIZE=10000 \
+  ./hload/run_background_import.sh
+```
+
+**For multiple instances:**
+
+If you have multiple HAPI instances in your registry, specify which one:
+
+```bash
+INSTANCE_NAME=my-hapi ./hload/run_background_import.sh
+```
+
+See [Background Import Workflow](#background-import-workflow) section below for detailed usage.
+
 ## Main Tool
 
 ### hapi_manager.py
@@ -353,6 +405,238 @@ python hload/hapi_manager.py run \
 
 # List all instances
 python hload/hapi_manager.py list
+```
+
+## Background Import Workflow
+
+For long-running imports on remote servers (especially via SSH), use the dedicated background import scripts.
+
+### Prerequisites
+
+1. **Fix Docker permissions** (Ubuntu/Linux only):
+
+```bash
+# Add your user to docker group
+sudo usermod -aG docker $USER
+
+# Log out and back in, then verify
+docker ps  # Should work without sudo
+```
+
+2. **Create necessary directories**:
+
+```bash
+# Create data directories
+sudo mkdir -p /data/hapi /data/ndjson /data/hapi/logs
+sudo chown $USER:$USER /data/hapi /data/ndjson /data/hapi/logs
+```
+
+3. **Set up HAPI instance**:
+
+```bash
+# Create a HAPI instance with storage under /data/hapi/
+python hload/hapi_manager.py run \
+  --name hapi-prod \
+  --port 8080 \
+  --data-dir /data/hapi/production
+
+# Verify it's running
+python hload/hapi_manager.py list
+```
+
+### Starting Background Import
+
+The script automatically detects your HAPI instance from `.env` and uses sensible defaults:
+
+```bash
+# Simple - uses defaults:
+# - Source: /data/ndjson
+# - Logs: /data/hapi/logs/
+# - Batch size: 10000
+./hload/run_background_import.sh
+```
+
+**Custom configuration:**
+
+```bash
+# Custom source directory
+SOURCE_DIR=/path/to/my/ndjson ./hload/run_background_import.sh
+
+# Custom log location
+LOG_DIR=/var/log/hapi ./hload/run_background_import.sh
+
+# Custom batch size (smaller for memory-constrained systems)
+BATCH_SIZE=5000 ./hload/run_background_import.sh
+
+# Combine settings
+SOURCE_DIR=/data/ndjson LOG_DIR=/data/hapi/logs BATCH_SIZE=10000 \
+  ./hload/run_background_import.sh
+```
+
+**Expected output:**
+
+```
+HAPI FHIR Background Import Runner
+
+✓ Log directory: /data/hapi/logs
+✓ Using instance: hapi-prod (port 8080)
+✓ Source directory: /data/ndjson
+✓ Batch size: 10000
+✓ Log file: /data/hapi/logs/import_20260416_094500.log
+
+🚀 Starting background import...
+   Command: python3 hapi_manager.py bulk-import "/data/ndjson" --name "hapi-prod" --batch-size 10000 --verbose
+
+✅ Import started in background
+
+   Process ID: 12345
+   Log file: /data/hapi/logs/import_20260416_094500.log
+   Latest log: /data/hapi/logs/import_latest.log
+
+📊 Monitor progress:
+   tail -f /data/hapi/logs/import_latest.log
+
+You can now safely close this SSH session
+```
+
+### Monitoring Progress
+
+**Check status:**
+
+```bash
+./hload/check_import_progress.sh
+```
+
+This shows:
+- Whether import is running
+- Process ID and runtime
+- Memory and CPU usage
+- Last 20 lines of log
+
+**Watch live progress:**
+
+```bash
+# Follow the log in real-time (Ctrl+C to stop watching)
+tail -f /data/hapi/logs/import_latest.log
+
+# Show last 100 lines
+tail -n 100 /data/hapi/logs/import_latest.log
+```
+
+**Check manually:**
+
+```bash
+# Check if process is running
+ps aux | grep bulk_import_loader.py
+
+# View full log
+less /data/hapi/logs/import_latest.log
+
+# Search for errors
+grep -i error /data/hapi/logs/import_latest.log
+```
+
+### Stopping the Import
+
+If you need to stop the import:
+
+```bash
+# Get the PID
+cat /data/hapi/logs/import.pid
+
+# Stop gracefully
+kill $(cat /data/hapi/logs/import.pid)
+
+# Force stop if needed
+kill -9 $(cat /data/hapi/logs/import.pid)
+```
+
+### After Import Completes
+
+The import will automatically stop when finished. Check the final status:
+
+```bash
+# Check if still running
+./hload/check_import_progress.sh
+
+# View final summary in log
+tail -n 50 /data/hapi/logs/import_latest.log
+```
+
+### Log File Management
+
+Logs are timestamped and kept for historical reference:
+
+```bash
+# List all import logs
+ls -lh /data/hapi/logs/import_*.log
+
+# View specific log
+less /data/hapi/logs/import_20260416_094500.log
+
+# Clean up old logs (manual)
+find /data/hapi/logs -name "import_*.log" -mtime +30 -delete
+```
+
+### Troubleshooting Background Import
+
+**Import won't start:**
+
+1. Check Docker permissions: `docker ps` (should work without sudo)
+2. Verify source directory exists: `ls -la /data/ndjson`
+3. Check HAPI instance is running: `python hload/hapi_manager.py list`
+
+**Import stopped unexpectedly:**
+
+1. Check the log for errors: `tail -n 100 /data/hapi/logs/import_latest.log`
+2. Check disk space: `df -h /data`
+3. Check HAPI container logs: `docker logs hapi-prod`
+
+**Multiple instances in registry:**
+
+If you have multiple HAPI instances, specify which one:
+
+```bash
+INSTANCE_NAME=hapi-prod ./hload/run_background_import.sh
+```
+
+### Ubuntu VM Setup Example
+
+Complete setup for Ubuntu VM with storage under `/data/hapi/`:
+
+```bash
+# 1. Fix Docker permissions
+sudo usermod -aG docker $USER
+exit  # Log out and back in
+
+# 2. Create directories
+sudo mkdir -p /data/hapi /data/ndjson /data/hapi/logs
+sudo chown $USER:$USER /data/hapi /data/ndjson /data/hapi/logs
+
+# 3. Copy NDJSON files to /data/ndjson/
+# (use scp, rsync, or whatever method you prefer)
+
+# 4. Create HAPI instance
+cd ~/gitgov/DSACMS/FHIRTableSaw
+python hload/hapi_manager.py run \
+  --name hapi-prod \
+  --port 8080 \
+  --data-dir /data/hapi/production
+
+# 5. Wait for HAPI to start (30-60 seconds)
+docker logs -f hapi-prod
+# Press Ctrl+C when you see "Started Application"
+
+# 6. Start background import
+./hload/run_background_import.sh
+
+# 7. Disconnect SSH safely
+exit
+
+# 8. Reconnect later to check progress
+ssh user@your-server
+cd ~/gitgov/DSACMS/FHIRTableSaw
+./hload/check_import_progress.sh
 ```
 
 =====================

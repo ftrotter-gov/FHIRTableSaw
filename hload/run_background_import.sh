@@ -115,17 +115,16 @@ if ! command -v python3 &> /dev/null; then
     PYTHON_CMD="python"
 fi
 
-CMD="$PYTHON_CMD hload/hapi_manager.py bulk-import \"$SOURCE_DIR\" \
-    --name \"$INSTANCE_NAME\" \
-    --batch-size $BATCH_SIZE \
-    --verbose"
-
 echo "🚀 Starting background import..."
-echo "   Command: $CMD"
+echo "   Command: $PYTHON_CMD hload/hapi_manager.py bulk-import $SOURCE_DIR --name $INSTANCE_NAME --batch-size $BATCH_SIZE --verbose"
 echo ""
 
 # Run in background with nohup
-nohup $CMD > "$LOG_FILE" 2>&1 &
+# Don't use a CMD variable - pass arguments directly to avoid quote issues
+nohup "$PYTHON_CMD" hload/hapi_manager.py bulk-import "$SOURCE_DIR" \
+    --name "$INSTANCE_NAME" \
+    --batch-size "$BATCH_SIZE" \
+    --verbose > "$LOG_FILE" 2>&1 &
 IMPORT_PID=$!
 
 # Save PID
